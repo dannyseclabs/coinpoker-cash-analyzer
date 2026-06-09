@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { AlertTriangle, UploadCloud } from "lucide-react";
 
 import {
   didHeroReachShowdown,
@@ -158,7 +159,7 @@ interface SummaryExplanation {
   readonly interpretation: string;
 }
 
-type MetricStatusTone = "good" | "caution" | "bad";
+type MetricStatusTone = "green" | "blue" | "teal" | "amber" | "orange" | "red" | "neutral";
 
 interface MetricStatus {
   readonly label: string;
@@ -218,6 +219,25 @@ const SUMMARY_EXPLANATIONS: Readonly<Record<SummaryMetricLabel, SummaryExplanati
     interpretation: "Higher is better, but very high with low WTSD may mean over-folding.",
   },
 };
+
+const SECTION_GAP_CLASS = "flex flex-col gap-4";
+const CARD_CLASS =
+  "rounded-2xl border border-zinc-200/80 bg-white shadow-sm shadow-zinc-200/60 transition duration-200 hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md hover:shadow-zinc-200/70";
+const TABLE_CONTAINER_CLASS =
+  "overflow-x-auto rounded-xl border border-zinc-200/80 bg-white shadow-sm shadow-zinc-200/50";
+const TABLE_CLASS = "w-full border-collapse text-left text-sm";
+const TABLE_HEAD_CLASS =
+  "sticky top-0 z-10 border-b border-zinc-200 bg-zinc-100/90 text-[11px] font-semibold uppercase tracking-wide text-zinc-600 backdrop-blur";
+const TABLE_HEADER_CELL_CLASS = "px-4 py-3 whitespace-nowrap";
+const TABLE_CELL_CLASS = "border-b border-zinc-100 px-4 py-3 align-middle text-zinc-700";
+const TABLE_NUMERIC_CELL_CLASS =
+  "border-b border-zinc-100 px-4 py-3 text-right align-middle font-mono text-[13px] tabular-nums text-zinc-800";
+const CONTROL_CLASS =
+  "h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-950 shadow-sm transition focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-950/10 disabled:cursor-not-allowed disabled:opacity-50";
+const BUTTON_CLASS =
+  "inline-flex h-9 items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-100 hover:text-zinc-950 focus:outline-none focus:ring-2 focus:ring-zinc-950/15 disabled:cursor-not-allowed disabled:opacity-45";
+const SMALL_BUTTON_CLASS =
+  "inline-flex items-center justify-center rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-100 hover:text-zinc-950 focus:outline-none focus:ring-2 focus:ring-zinc-950/15 disabled:cursor-not-allowed disabled:opacity-45";
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -296,22 +316,38 @@ function createMetricStatus(label: string, tone: MetricStatusTone, tooltip: stri
 }
 
 function getStatusToneClass(tone: MetricStatusTone): string {
-  if (tone === "good") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (tone === "green") {
+    return "border-emerald-400 bg-emerald-100 text-emerald-950 shadow-emerald-900/5";
   }
 
-  if (tone === "caution") {
-    return "border-amber-200 bg-amber-50 text-amber-800";
+  if (tone === "blue") {
+    return "border-blue-300 bg-blue-100 text-blue-950 shadow-blue-900/5";
   }
 
-  return "border-red-200 bg-red-50 text-red-800";
+  if (tone === "teal") {
+    return "border-cyan-300 bg-cyan-100 text-cyan-950 shadow-cyan-900/5";
+  }
+
+  if (tone === "amber") {
+    return "border-amber-300 bg-amber-100 text-amber-950 shadow-amber-900/5";
+  }
+
+  if (tone === "orange") {
+    return "border-orange-300 bg-orange-100 text-orange-950 shadow-orange-900/5";
+  }
+
+  if (tone === "neutral") {
+    return "border-zinc-300 bg-zinc-100 text-zinc-800 shadow-zinc-900/5";
+  }
+
+  return "border-red-300 bg-red-100 text-red-950 shadow-red-900/5";
 }
 
 function getBbPer100Status(bbPer100: number): MetricStatus {
   if (bbPer100 < -1) {
     return createMetricStatus(
       "Losing",
-      "bad",
+      "red",
       "BB/100 below -1 means Hero is currently losing more than one big blind per 100 hands.",
     );
   }
@@ -319,7 +355,7 @@ function getBbPer100Status(bbPer100: number): MetricStatus {
   if (bbPer100 < 1) {
     return createMetricStatus(
       "Breakeven",
-      "caution",
+      "neutral",
       "BB/100 between -1 and 1 is roughly breakeven; sample size can easily move it.",
     );
   }
@@ -327,14 +363,14 @@ function getBbPer100Status(bbPer100: number): MetricStatus {
   if (bbPer100 < 8) {
     return createMetricStatus(
       "Winning",
-      "good",
+      "blue",
       "BB/100 from 1 to 8 suggests Hero is winning, assuming the sample is large enough.",
     );
   }
 
   return createMetricStatus(
     "Crushing",
-    "good",
+    "green",
     "BB/100 above 8 is a very strong win rate; confirm it with a large hand sample.",
   );
 }
@@ -343,7 +379,7 @@ function getVpipStatus(vpip: number): MetricStatus {
   if (vpip < 20) {
     return createMetricStatus(
       "Tight",
-      "caution",
+      "teal",
       "VPIP below 20% is tight for 6-max cash and may mean Hero is passing up playable hands.",
     );
   }
@@ -351,7 +387,7 @@ function getVpipStatus(vpip: number): MetricStatus {
   if (vpip <= 28) {
     return createMetricStatus(
       "Normal",
-      "good",
+      "blue",
       "VPIP from 20% to 28% is a common healthy 6-max cash range.",
     );
   }
@@ -359,14 +395,14 @@ function getVpipStatus(vpip: number): MetricStatus {
   if (vpip <= 35) {
     return createMetricStatus(
       "Loose",
-      "caution",
+      "orange",
       "VPIP from 28% to 35% is loose and needs disciplined postflop play.",
     );
   }
 
   return createMetricStatus(
     "Very Loose",
-    "bad",
+    "red",
     "VPIP above 35% is very loose and often means Hero is playing too many weak hands.",
   );
 }
@@ -375,7 +411,7 @@ function getPfrStatus(pfr: number): MetricStatus {
   if (pfr < 15) {
     return createMetricStatus(
       "Passive",
-      "caution",
+      "amber",
       "PFR below 15% is passive for 6-max cash and can mean too much calling preflop.",
     );
   }
@@ -383,14 +419,14 @@ function getPfrStatus(pfr: number): MetricStatus {
   if (pfr <= 24) {
     return createMetricStatus(
       "Normal",
-      "good",
+      "blue",
       "PFR from 15% to 24% is a common healthy 6-max cash range.",
     );
   }
 
   return createMetricStatus(
     "Aggressive",
-    "caution",
+    "orange",
     "PFR above 24% is aggressive and can be profitable only with good hand selection.",
   );
 }
@@ -399,7 +435,7 @@ function getThreeBetStatus(threeBet: number): MetricStatus {
   if (threeBet < 5) {
     return createMetricStatus(
       "Low",
-      "caution",
+      "teal",
       "3Bet below 5% is low and may indicate Hero is not re-raising enough strong hands.",
     );
   }
@@ -407,14 +443,14 @@ function getThreeBetStatus(threeBet: number): MetricStatus {
   if (threeBet <= 10) {
     return createMetricStatus(
       "Normal",
-      "good",
+      "blue",
       "3Bet from 5% to 10% is a common solid 6-max cash range.",
     );
   }
 
   return createMetricStatus(
     "High",
-    "caution",
+    "orange",
     "3Bet above 10% is high and needs good opponent selection to avoid over-aggression.",
   );
 }
@@ -423,7 +459,7 @@ function getLimpStatus(limp: number): MetricStatus {
   if (limp < 3) {
     return createMetricStatus(
       "Low",
-      "good",
+      "green",
       "Limp below 3% is low, which is usually healthy in 6-max cash games.",
     );
   }
@@ -431,14 +467,14 @@ function getLimpStatus(limp: number): MetricStatus {
   if (limp <= 8) {
     return createMetricStatus(
       "Moderate",
-      "caution",
+      "amber",
       "Limp from 3% to 8% is moderate; check whether calls should be raises or folds.",
     );
   }
 
   return createMetricStatus(
     "High",
-    "bad",
+    "red",
     "Limp above 8% is high and often indicates too much passive preflop play.",
   );
 }
@@ -447,7 +483,7 @@ function getCBetFlopStatus(cBetFlop: number): MetricStatus {
   if (cBetFlop < 45) {
     return createMetricStatus(
       "Low",
-      "caution",
+      "teal",
       "Flop CBet below 45% is low and may mean Hero is missing profitable pressure spots.",
     );
   }
@@ -455,7 +491,7 @@ function getCBetFlopStatus(cBetFlop: number): MetricStatus {
   if (cBetFlop <= 65) {
     return createMetricStatus(
       "Normal",
-      "good",
+      "blue",
       "Flop CBet from 45% to 65% is a common balanced cash-game range.",
     );
   }
@@ -463,14 +499,14 @@ function getCBetFlopStatus(cBetFlop: number): MetricStatus {
   if (cBetFlop <= 80) {
     return createMetricStatus(
       "High",
-      "caution",
+      "orange",
       "Flop CBet from 65% to 80% is high and may become exploitable against callers.",
     );
   }
 
   return createMetricStatus(
     "Overcbetting",
-    "bad",
+    "red",
     "Flop CBet above 80% often means Hero is betting too many weak flops.",
   );
 }
@@ -479,7 +515,7 @@ function getWtsdStatus(wtsd: number): MetricStatus {
   if (wtsd < 22) {
     return createMetricStatus(
       "Low",
-      "caution",
+      "teal",
       "WTSD below 22% can mean Hero is folding too often before showdown.",
     );
   }
@@ -487,7 +523,7 @@ function getWtsdStatus(wtsd: number): MetricStatus {
   if (wtsd <= 30) {
     return createMetricStatus(
       "Normal",
-      "good",
+      "blue",
       "WTSD from 22% to 30% is a common healthy cash-game range.",
     );
   }
@@ -495,14 +531,14 @@ function getWtsdStatus(wtsd: number): MetricStatus {
   if (wtsd <= 50) {
     return createMetricStatus(
       "High",
-      "caution",
+      "orange",
       "WTSD from 30% to 50% is high and can indicate too much showdown curiosity.",
     );
   }
 
   return createMetricStatus(
     "Very High",
-    "bad",
+    "red",
     "WTSD above 50% often indicates calling too many marginal hands to showdown.",
   );
 }
@@ -511,7 +547,7 @@ function getWsdStatus(wsd: number): MetricStatus {
   if (wsd < 45) {
     return createMetricStatus(
       "Poor",
-      "bad",
+      "red",
       "W$SD below 45% means Hero is losing too often when reaching showdown.",
     );
   }
@@ -519,7 +555,7 @@ function getWsdStatus(wsd: number): MetricStatus {
   if (wsd <= 55) {
     return createMetricStatus(
       "Normal",
-      "good",
+      "blue",
       "W$SD from 45% to 55% is a common normal showdown result range.",
     );
   }
@@ -527,14 +563,14 @@ function getWsdStatus(wsd: number): MetricStatus {
   if (wsd <= 60) {
     return createMetricStatus(
       "Strong",
-      "good",
+      "green",
       "W$SD from 55% to 60% is strong, especially with a normal WTSD.",
     );
   }
 
   return createMetricStatus(
     "Elite",
-    "good",
+    "green",
     "W$SD above 60% is elite, but may also reflect a small sample or very selective showdowns.",
   );
 }
@@ -660,6 +696,23 @@ function validateFileContent(file: File, text: string): string | null {
   return null;
 }
 
+function SectionHeader({
+  title,
+  description,
+}: Readonly<{
+  title: string;
+  description?: string;
+}>) {
+  return (
+    <div className="flex flex-col gap-1">
+      <h2 className="text-lg font-semibold tracking-tight text-zinc-950 sm:text-xl">{title}</h2>
+      {description === undefined ? null : (
+        <p className="max-w-3xl text-sm leading-6 text-zinc-600">{description}</p>
+      )}
+    </div>
+  );
+}
+
 function StatTile({
   label,
   value,
@@ -672,12 +725,12 @@ function StatTile({
   status?: MetricStatus;
 }>) {
   return (
-    <div className="border border-zinc-200 bg-white p-4">
+    <div className={`${CARD_CLASS} p-4`}>
       <dt className="flex items-start justify-between gap-3 text-xs font-medium uppercase tracking-wide text-zinc-500">
         <span>{label}</span>
         {status === undefined ? null : (
           <span
-            className={`rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-normal ${getStatusToneClass(
+            className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getStatusToneClass(
               status.tone,
             )}`}
             title={status.tooltip}
@@ -686,16 +739,19 @@ function StatTile({
           </span>
         )}
       </dt>
-      <dd className="mt-2 text-2xl font-semibold text-zinc-950">{value}</dd>
+      <dd className="mt-3 text-3xl font-semibold tracking-tight text-zinc-950 tabular-nums">
+        {value}
+      </dd>
       {explanation === undefined ? null : (
-        <details className="mt-3 text-xs text-zinc-600">
-          <summary className="cursor-pointer font-medium text-zinc-700 transition hover:text-zinc-950">
-            What this means
+        <details className="group mt-4 rounded-lg border border-zinc-100 bg-zinc-50/80 text-xs text-zinc-600 open:border-zinc-200 open:bg-white">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-medium text-zinc-700 transition hover:text-zinc-950 group-open:border-b group-open:border-zinc-100 [&::-webkit-details-marker]:hidden">
+            <span>What this means</span>
+            <span className="text-zinc-400 transition group-open:rotate-90">›</span>
           </summary>
-          <div className="mt-2 space-y-1.5 leading-relaxed">
-            <p className="font-semibold text-zinc-800">{explanation.fullName}</p>
-            <p>{explanation.explanation}</p>
-            <p>{explanation.interpretation}</p>
+          <div className="space-y-2 px-3 py-3 leading-5">
+            <p className="font-semibold text-zinc-900">{explanation.fullName}</p>
+            <p className="text-zinc-600">{explanation.explanation}</p>
+            <p className="text-zinc-700">{explanation.interpretation}</p>
           </div>
         </details>
       )}
@@ -713,12 +769,12 @@ function PositionHighlight({
   value: string | undefined;
 }>) {
   return (
-    <div className="border border-zinc-200 bg-white p-4">
+    <div className={`${CARD_CLASS} p-4`}>
       <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
       <dd className="mt-2 flex items-baseline gap-3">
-        <span className="text-2xl font-semibold text-zinc-950">{title}</span>
+        <span className="text-2xl font-semibold tracking-tight text-zinc-950">{title}</span>
         {value === undefined ? null : (
-          <span className="text-sm font-medium text-zinc-600">{value}</span>
+          <span className="font-mono text-sm font-medium tabular-nums text-zinc-600">{value}</span>
         )}
       </dd>
     </div>
@@ -738,31 +794,29 @@ function HandDetailPanel({
     <div
       aria-label={`Hand ${hand.handId} detail`}
       aria-modal="true"
-      className="fixed inset-0 z-50 flex justify-end bg-zinc-950/40"
+      className="fixed inset-0 z-50 flex justify-end bg-zinc-950/45 backdrop-blur-sm"
       role="dialog"
     >
-      <div className="flex h-full w-full max-w-4xl flex-col overflow-y-auto bg-white shadow-xl">
-        <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white px-5 py-4">
+      <div className="flex h-full w-full max-w-4xl flex-col overflow-y-auto bg-zinc-50 shadow-2xl">
+        <header className="sticky top-0 z-10 border-b border-zinc-200/80 bg-white/95 px-5 py-4 backdrop-blur">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                 Hand Detail
               </p>
-              <h2 className="mt-1 text-xl font-semibold text-zinc-950">{hand.handId}</h2>
+              <h2 className="mt-1 font-mono text-xl font-semibold tracking-tight text-zinc-950">
+                {hand.handId}
+              </h2>
               <p className="mt-1 text-sm text-zinc-600">{hand.date}</p>
             </div>
-            <button
-              className="border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
-              type="button"
-              onClick={onClose}
-            >
+            <button className={BUTTON_CLASS} type="button" onClick={onClose}>
               Close
             </button>
           </div>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <dt className="text-xs uppercase tracking-wide text-zinc-500">Stakes</dt>
-              <dd className="mt-1 font-semibold">{formatStakes(hand)}</dd>
+              <dd className="mt-1 font-mono font-semibold tabular-nums">{formatStakes(hand)}</dd>
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-zinc-500">Table</dt>
@@ -770,7 +824,7 @@ function HandDetailPanel({
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero cards</dt>
-              <dd className="mt-1 font-semibold">{formatCards(hand.heroCards)}</dd>
+              <dd className="mt-1 font-mono font-semibold">{formatCards(hand.heroCards)}</dd>
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero position</dt>
@@ -778,37 +832,37 @@ function HandDetailPanel({
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero net</dt>
-              <dd className="mt-1 font-semibold">{formatSignedCurrency(hand.heroNetResult)}</dd>
+              <dd className="mt-1 font-mono font-semibold tabular-nums">
+                {formatSignedCurrency(hand.heroNetResult)}
+              </dd>
             </div>
           </dl>
         </header>
 
-        <div className="flex flex-col gap-6 px-5 py-5">
-          <section className="flex flex-col gap-3">
-            <h3 className="text-lg font-semibold">Players</h3>
-            <div className="overflow-x-auto border border-zinc-200">
-              <table className="w-full min-w-[560px] border-collapse text-left text-sm">
-                <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-600">
+        <div className="flex flex-col gap-5 px-5 py-5">
+          <section className={SECTION_GAP_CLASS}>
+            <h3 className="text-base font-semibold text-zinc-950">Players</h3>
+            <div className={TABLE_CONTAINER_CLASS}>
+              <table className={`${TABLE_CLASS} min-w-[560px]`}>
+                <thead className={TABLE_HEAD_CLASS}>
                   <tr>
-                    <th className="border-b border-zinc-200 px-3 py-2">Seat</th>
-                    <th className="border-b border-zinc-200 px-3 py-2">Player</th>
-                    <th className="border-b border-zinc-200 px-3 py-2">Stack</th>
-                    <th className="border-b border-zinc-200 px-3 py-2">Hero</th>
+                    <th className={TABLE_HEADER_CELL_CLASS}>Seat</th>
+                    <th className={TABLE_HEADER_CELL_CLASS}>Player</th>
+                    <th className={TABLE_HEADER_CELL_CLASS}>Stack</th>
+                    <th className={TABLE_HEADER_CELL_CLASS}>Hero</th>
                   </tr>
                 </thead>
                 <tbody>
                   {hand.players.map((player) => (
-                    <tr key={player.seat} className="odd:bg-white even:bg-zinc-50">
-                      <td className="border-b border-zinc-100 px-3 py-2">{player.seat}</td>
-                      <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                    <tr key={player.seat} className="odd:bg-white even:bg-zinc-50/80">
+                      <td className={TABLE_CELL_CLASS}>{player.seat}</td>
+                      <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
                         {player.name}
                       </td>
-                      <td className="border-b border-zinc-100 px-3 py-2">
+                      <td className={TABLE_NUMERIC_CELL_CLASS}>
                         {formatCurrency(player.startingStack)}
                       </td>
-                      <td className="border-b border-zinc-100 px-3 py-2">
-                        {player.isHero ? "Hero" : "-"}
-                      </td>
+                      <td className={TABLE_CELL_CLASS}>{player.isHero ? "Hero" : "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -816,58 +870,61 @@ function HandDetailPanel({
             </div>
           </section>
 
-          <section className="flex flex-col gap-3">
-            <h3 className="text-lg font-semibold">Board</h3>
+          <section className={SECTION_GAP_CLASS}>
+            <h3 className="text-base font-semibold text-zinc-950">Board</h3>
             <div className="grid gap-3 text-sm sm:grid-cols-3">
-              <div className="border border-zinc-200 bg-zinc-50 p-3">
+              <div className={`${CARD_CLASS} p-3`}>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Flop</dt>
-                <dd className="mt-1 font-semibold">{formatCards(hand.board.flop)}</dd>
+                <dd className="mt-1 font-mono font-semibold">{formatCards(hand.board.flop)}</dd>
               </div>
-              <div className="border border-zinc-200 bg-zinc-50 p-3">
+              <div className={`${CARD_CLASS} p-3`}>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Turn</dt>
-                <dd className="mt-1 font-semibold">{hand.board.turn ?? "-"}</dd>
+                <dd className="mt-1 font-mono font-semibold">{hand.board.turn ?? "-"}</dd>
               </div>
-              <div className="border border-zinc-200 bg-zinc-50 p-3">
+              <div className={`${CARD_CLASS} p-3`}>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">River</dt>
-                <dd className="mt-1 font-semibold">{hand.board.river ?? "-"}</dd>
+                <dd className="mt-1 font-mono font-semibold">{hand.board.river ?? "-"}</dd>
               </div>
             </div>
-            <p className="text-sm text-zinc-600">Full board: {boardCards || "-"}</p>
+            <p className="rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-sm text-zinc-700">
+              Full board: {boardCards || "-"}
+            </p>
           </section>
 
-          <section className="flex flex-col gap-3">
-            <h3 className="text-lg font-semibold">Action Timeline</h3>
+          <section className={SECTION_GAP_CLASS}>
+            <h3 className="text-base font-semibold text-zinc-950">Action Timeline</h3>
             {(["preflop", "flop", "turn", "river"] as const).map((street) => (
-              <div key={street} className="border border-zinc-200">
-                <h4 className="border-b border-zinc-200 bg-zinc-100 px-3 py-2 text-sm font-semibold">
+              <div
+                key={street}
+                className="overflow-hidden rounded-xl border border-zinc-200 bg-white"
+              >
+                <h4 className="border-b border-zinc-200 bg-zinc-100/80 px-4 py-3 text-sm font-semibold">
                   {STREET_LABELS[street]}
                 </h4>
                 {hand.streetActions[street].length === 0 ? (
-                  <p className="px-3 py-3 text-sm text-zinc-600">No actions recorded.</p>
+                  <p className="px-4 py-4 text-sm text-zinc-600">No actions recorded.</p>
                 ) : (
-                  <table className="w-full border-collapse text-left text-sm">
-                    <thead className="text-xs uppercase tracking-wide text-zinc-500">
+                  <table className={TABLE_CLASS}>
+                    <thead className="text-[11px] uppercase tracking-wide text-zinc-500">
                       <tr>
-                        <th className="border-b border-zinc-100 px-3 py-2">Player</th>
-                        <th className="border-b border-zinc-100 px-3 py-2">Action</th>
-                        <th className="border-b border-zinc-100 px-3 py-2">Amount</th>
+                        <th className={TABLE_HEADER_CELL_CLASS}>Player</th>
+                        <th className={TABLE_HEADER_CELL_CLASS}>Action</th>
+                        <th className={TABLE_HEADER_CELL_CLASS}>Amount</th>
                       </tr>
                     </thead>
                     <tbody>
                       {hand.streetActions[street].map((action) => (
                         <tr
                           key={`${action.street}-${action.order}`}
-                          className="odd:bg-white even:bg-zinc-50"
+                          className="odd:bg-white even:bg-zinc-50/80"
                         >
-                          <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                          <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
                             {action.playerName}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2 capitalize">
+                          <td className={`${TABLE_CELL_CLASS} capitalize`}>
                             {formatActionType(action.type)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
-                            {formatActionDetail(action)}
-                          </td>
+                          <td className={TABLE_CELL_CLASS}>{formatActionDetail(action)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -877,37 +934,37 @@ function HandDetailPanel({
             ))}
           </section>
 
-          <section className="flex flex-col gap-3">
-            <h3 className="text-lg font-semibold">Showdown</h3>
+          <section className={SECTION_GAP_CLASS}>
+            <h3 className="text-base font-semibold text-zinc-950">Showdown</h3>
             {hand.showdown === null || hand.showdown.entries.length === 0 ? (
-              <p className="border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+              <p className={`${CARD_CLASS} p-4 text-sm text-zinc-600`}>
                 No visible showdown entries.
               </p>
             ) : (
-              <div className="overflow-x-auto border border-zinc-200">
-                <table className="w-full min-w-[640px] border-collapse text-left text-sm">
-                  <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-600">
+              <div className={TABLE_CONTAINER_CLASS}>
+                <table className={`${TABLE_CLASS} min-w-[640px]`}>
+                  <thead className={TABLE_HEAD_CLASS}>
                     <tr>
-                      <th className="border-b border-zinc-200 px-3 py-2">Player</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Cards</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Result</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Collected</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Player</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Cards</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Result</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Collected</th>
                     </tr>
                   </thead>
                   <tbody>
                     {hand.showdown.entries.map((entry) => (
-                      <tr key={entry.playerName} className="odd:bg-white even:bg-zinc-50">
-                        <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                      <tr key={entry.playerName} className="odd:bg-white even:bg-zinc-50/80">
+                        <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
                           {entry.playerName}
                         </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
+                        <td className={`${TABLE_CELL_CLASS} font-mono`}>
                           {formatCards(entry.cards)}
                         </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
+                        <td className={TABLE_CELL_CLASS}>
                           {getShowdownResult(hand, entry.playerName, entry.wonAmount)}
                           {entry.handDescription === null ? "" : ` (${entry.handDescription})`}
                         </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
+                        <td className={TABLE_NUMERIC_CELL_CLASS}>
                           {formatCurrency(entry.wonAmount)}
                         </td>
                       </tr>
@@ -1057,42 +1114,62 @@ export function CoinPokerAnalyzer() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-50 px-6 py-8 text-zinc-950">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
-        <header className="flex flex-col gap-2">
-          <p className="text-sm font-medium uppercase tracking-wide text-zinc-500">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.08),transparent_32rem),linear-gradient(180deg,#fafafa,#f4f4f5)] px-4 py-6 text-zinc-950 sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-7">
+        <header className="flex flex-col gap-2 rounded-2xl border border-zinc-200/70 bg-white/80 px-5 py-5 shadow-sm shadow-zinc-200/50 backdrop-blur sm:px-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
             CoinPoker Cash Analyzer V1
           </p>
-          <h1 className="text-3xl font-semibold tracking-tight">Local hand history tester</h1>
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
+                Local hand history tester
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600">
+                Import a CoinPoker cash-game hand history and inspect the core tracker stats, leaks,
+                positions, starting hands, and individual hands locally.
+              </p>
+            </div>
+          </div>
         </header>
 
-        <section className="border border-dashed border-zinc-300 bg-white p-6">
-          <label className="flex cursor-pointer flex-col gap-3">
-            <span className="text-sm font-medium text-zinc-700">
-              Upload a CoinPoker `.txt` hand history export
+        <section className="rounded-3xl border border-dashed border-zinc-300 bg-white/90 p-3 shadow-sm shadow-zinc-200/50">
+          <label className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-transparent px-4 py-5 transition hover:border-emerald-200 hover:bg-emerald-50/40 focus-within:border-zinc-400 focus-within:ring-2 focus-within:ring-zinc-950/10">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition group-hover:scale-105 group-hover:bg-emerald-100">
+              <UploadCloud aria-hidden="true" className="h-6 w-6" strokeWidth={1.8} />
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="text-base font-semibold text-zinc-950">
+                Drop CoinPoker hand history here
+              </span>
+              <span className="text-sm text-zinc-600">or click to browse</span>
+              <span className="text-xs font-medium text-zinc-400">
+                Accepts `.txt` CoinPoker NLH cash exports with Hero hands.
+              </span>
             </span>
             <input
               accept=".txt,text/plain"
-              className="block w-full text-sm text-zinc-700 file:mr-4 file:border-0 file:bg-zinc-950 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-800"
+              className="sr-only"
               disabled={isReading}
               type="file"
               onChange={handleFileChange}
             />
           </label>
-          {isReading ? <p className="mt-4 text-sm text-zinc-600">Reading file...</p> : null}
+          {isReading ? (
+            <p className="mt-4 text-sm font-medium text-zinc-600">Reading file...</p>
+          ) : null}
           {error !== null ? (
-            <p className="mt-4 border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
+            <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+              {error}
+            </p>
           ) : null}
         </section>
 
         {result !== null ? (
           <>
-            <section className="flex flex-col gap-3">
-              <div>
-                <h2 className="text-xl font-semibold">Summary</h2>
-                <p className="text-sm text-zinc-600">{result.fileName}</p>
-              </div>
-              <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <section className={SECTION_GAP_CLASS}>
+              <SectionHeader title="Summary" description={result.fileName} />
+              <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
                 <StatTile
                   explanation={SUMMARY_EXPLANATIONS["Parsed hands"]}
                   label="Parsed hands"
@@ -1155,15 +1232,12 @@ export function CoinPokerAnalyzer() {
             </section>
 
             {positionHighlights !== null ? (
-              <section className="flex flex-col gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold">Position Analysis</h2>
-                  <p className="mt-1 text-sm text-zinc-600">
-                    Position results are noisy on small samples. Use at least 1,000+ hands for
-                    meaningful winrate conclusions.
-                  </p>
-                </div>
-                <dl className="grid gap-3 md:grid-cols-3">
+              <section className={SECTION_GAP_CLASS}>
+                <SectionHeader
+                  title="Position Analysis"
+                  description="Position results are noisy on small samples. Use at least 1,000+ hands for meaningful winrate conclusions."
+                />
+                <dl className="grid gap-4 md:grid-cols-3">
                   <PositionHighlight
                     label="Best Position"
                     title={positionHighlights.best?.position ?? "Not enough sample"}
@@ -1192,51 +1266,46 @@ export function CoinPokerAnalyzer() {
                     }
                   />
                 </dl>
-                <div className="overflow-x-auto border border-zinc-200 bg-white">
-                  <table className="w-full min-w-[860px] border-collapse text-left text-sm">
-                    <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-600">
+                <div className={TABLE_CONTAINER_CLASS}>
+                  <table className={`${TABLE_CLASS} min-w-[860px]`}>
+                    <thead className={TABLE_HEAD_CLASS}>
                       <tr>
-                        <th className="border-b border-zinc-200 px-3 py-2">Position</th>
-                        <th className="border-b border-zinc-200 px-3 py-2">Hands</th>
-                        <th className="border-b border-zinc-200 px-3 py-2">Sample</th>
-                        <th className="border-b border-zinc-200 px-3 py-2">VPIP</th>
-                        <th className="border-b border-zinc-200 px-3 py-2">PFR</th>
-                        <th className="border-b border-zinc-200 px-3 py-2">Profit</th>
-                        <th className="border-b border-zinc-200 px-3 py-2">BB/100</th>
-                        <th className="border-b border-zinc-200 px-3 py-2">WTSD</th>
-                        <th className="border-b border-zinc-200 px-3 py-2">W$SD</th>
+                        <th className={TABLE_HEADER_CELL_CLASS}>Position</th>
+                        <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Hands</th>
+                        <th className={TABLE_HEADER_CELL_CLASS}>Sample</th>
+                        <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>VPIP</th>
+                        <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>PFR</th>
+                        <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Profit</th>
+                        <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>BB/100</th>
+                        <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>WTSD</th>
+                        <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>W$SD</th>
                       </tr>
                     </thead>
                     <tbody>
                       {positionStats.map((stats) => (
-                        <tr key={stats.position} className="odd:bg-white even:bg-zinc-50">
-                          <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                        <tr
+                          key={stats.position}
+                          className="odd:bg-white even:bg-zinc-50/80 hover:bg-emerald-50/50"
+                        >
+                          <td className={`${TABLE_CELL_CLASS} font-semibold text-zinc-950`}>
                             {stats.position}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>
                             {formatNumber(stats.handsPlayed)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2 text-zinc-600">
+                          <td className={TABLE_CELL_CLASS}>
                             {getPositionSampleLabel(stats.handsPlayed)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
-                            {formatPercent(stats.vpip)}
-                          </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
-                            {formatPercent(stats.pfr)}
-                          </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(stats.vpip)}</td>
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(stats.pfr)}</td>
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>
                             {formatCurrency(stats.totalProfit)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>
                             {formatNumber(stats.bbPer100)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
-                            {formatPercent(stats.wtsd)}
-                          </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
-                            {formatPercent(stats.wsd)}
-                          </td>
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(stats.wtsd)}</td>
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(stats.wsd)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1246,26 +1315,23 @@ export function CoinPokerAnalyzer() {
             ) : null}
 
             {holeCardMatrix !== null ? (
-              <section className="flex flex-col gap-3">
+              <section className={SECTION_GAP_CLASS}>
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                  <div>
-                    <h2 className="text-xl font-semibold">Hole Card Matrix</h2>
-                    <p className="mt-1 text-sm text-zinc-600">
-                      Starting hand performance is noisy on small samples. BB/100 is shown
-                      confidently from 30+ hands.
-                    </p>
-                  </div>
+                  <SectionHeader
+                    title="Hole Card Matrix"
+                    description="Starting hand performance is noisy on small samples. BB/100 is shown confidently from 30+ hands."
+                  />
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
                       View Metric
                     </span>
-                    <div className="flex flex-wrap gap-1 border border-zinc-200 bg-white p-1">
+                    <div className="flex flex-wrap gap-1 rounded-xl border border-zinc-200 bg-white p-1 shadow-sm">
                       {HOLE_CARD_MATRIX_METRICS.map((metric) => (
                         <button
                           key={metric.value}
-                          className={`px-3 py-1.5 text-xs font-medium transition ${
+                          className={`rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-zinc-950/15 ${
                             holeCardMatrixMetric === metric.value
-                              ? "bg-zinc-950 text-white"
+                              ? "bg-zinc-950 text-white shadow-sm"
                               : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"
                           }`}
                           type="button"
@@ -1277,27 +1343,31 @@ export function CoinPokerAnalyzer() {
                     </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-3 text-xs text-zinc-600">
+                <div className="flex flex-wrap gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 shadow-sm">
                   {HOLE_CARD_LEGEND.map((item) => (
-                    <div key={item.label} className="flex items-center gap-1.5">
-                      <span className={`h-3 w-3 border ${item.className}`} />
+                    <div
+                      key={item.label}
+                      className="flex items-center gap-1.5 rounded-md px-1.5 py-1"
+                    >
+                      <span className={`h-3 w-3 rounded-sm border ${item.className}`} />
                       <span>{item.label}</span>
                     </div>
                   ))}
                 </div>
-                <div className="overflow-x-auto border border-zinc-200 bg-white px-2 py-3">
+                <div className="overflow-x-auto rounded-2xl border border-zinc-200 bg-white px-3 py-4 shadow-sm shadow-zinc-200/60">
                   <div
-                    className="mx-auto grid w-fit min-w-[520px] gap-0.5"
+                    className="mx-auto grid w-fit min-w-[520px] gap-1"
                     style={{ gridTemplateColumns: "repeat(13, minmax(38px, 44px))" }}
                   >
                     {holeCardMatrix.rows.flat().map((cell) => (
                       <button
                         key={cell.notation}
                         aria-label={`Show ${cell.notation} details`}
-                        className={`flex aspect-square items-center justify-center border text-center text-[11px] font-semibold leading-none transition focus:outline-none focus:ring-2 focus:ring-zinc-950 focus:ring-offset-1 ${getHoleCardTone(
-                          cell,
-                          holeCardMatrixMetric,
-                        )}`}
+                        className={`flex aspect-square items-center justify-center rounded-md border text-center text-[11px] font-semibold leading-none shadow-sm transition hover:scale-[1.03] focus:outline-none focus:ring-2 focus:ring-zinc-950 focus:ring-offset-1 ${
+                          selectedHoleCard === cell.notation
+                            ? "ring-2 ring-zinc-950 ring-offset-2"
+                            : ""
+                        } ${getHoleCardTone(cell, holeCardMatrixMetric)}`}
                         title={getHoleCardTooltip(cell)}
                         type="button"
                         onClick={() => setSelectedHoleCard(cell.notation)}
@@ -1309,14 +1379,14 @@ export function CoinPokerAnalyzer() {
                 </div>
 
                 {selectedHoleCardCell === null ? (
-                  <p className="border border-zinc-200 bg-white p-4 text-sm text-zinc-600">
+                  <p className={`${CARD_CLASS} p-4 text-sm text-zinc-600`}>
                     Select a starting hand to inspect its occurrences.
                   </p>
                 ) : (
-                  <div className="border border-zinc-200 bg-white p-4">
+                  <div className={`${CARD_CLASS} p-4`}>
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
-                        <h3 className="text-lg font-semibold">
+                        <h3 className="text-lg font-semibold tracking-tight">
                           Selected Hand: {selectedHoleCardCell.notation}
                         </h3>
                         <p className="mt-1 text-sm text-zinc-600">
@@ -1328,19 +1398,19 @@ export function CoinPokerAnalyzer() {
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">
                             Hands Played
                           </dt>
-                          <dd className="mt-1 font-semibold">
+                          <dd className="mt-1 font-mono font-semibold tabular-nums">
                             {formatNumber(selectedHoleCardCell.handsPlayed)}
                           </dd>
                         </div>
                         <div>
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">Profit</dt>
-                          <dd className="mt-1 font-semibold">
+                          <dd className="mt-1 font-mono font-semibold tabular-nums">
                             {formatSignedCurrency(selectedHoleCardCell.totalProfit)}
                           </dd>
                         </div>
                         <div>
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">BB/100</dt>
-                          <dd className="mt-1 font-semibold">
+                          <dd className="mt-1 font-mono font-semibold tabular-nums">
                             {formatConfidentBbPer100(selectedHoleCardCell)}
                           </dd>
                         </div>
@@ -1348,30 +1418,30 @@ export function CoinPokerAnalyzer() {
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">
                             Win Rate
                           </dt>
-                          <dd className="mt-1 font-semibold">
+                          <dd className="mt-1 font-mono font-semibold tabular-nums">
                             {formatPercent(getWinRate(selectedHoleCardCell))}
                           </dd>
                         </div>
                       </dl>
                     </div>
 
-                    <div className="mt-4 overflow-x-auto border border-zinc-200">
-                      <table className="w-full min-w-[640px] border-collapse text-left text-sm">
-                        <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-600">
+                    <div className={`mt-4 ${TABLE_CONTAINER_CLASS}`}>
+                      <table className={`${TABLE_CLASS} min-w-[700px]`}>
+                        <thead className={TABLE_HEAD_CLASS}>
                           <tr>
-                            <th className="border-b border-zinc-200 px-3 py-2">Hand ID</th>
-                            <th className="border-b border-zinc-200 px-3 py-2">Date</th>
-                            <th className="border-b border-zinc-200 px-3 py-2">Position</th>
-                            <th className="border-b border-zinc-200 px-3 py-2">Hero Net</th>
-                            <th className="border-b border-zinc-200 px-3 py-2">Hero Showdown</th>
-                            <th className="border-b border-zinc-200 px-3 py-2">Actions</th>
+                            <th className={TABLE_HEADER_CELL_CLASS}>Hand ID</th>
+                            <th className={TABLE_HEADER_CELL_CLASS}>Date</th>
+                            <th className={TABLE_HEADER_CELL_CLASS}>Position</th>
+                            <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Hero Net</th>
+                            <th className={TABLE_HEADER_CELL_CLASS}>Hero Showdown</th>
+                            <th className={TABLE_HEADER_CELL_CLASS}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
                           {selectedHoleCardOccurrences.length === 0 ? (
                             <tr>
                               <td
-                                className="border-b border-zinc-100 px-3 py-3 text-zinc-600"
+                                className="border-b border-zinc-100 px-4 py-4 text-zinc-600"
                                 colSpan={6}
                               >
                                 No occurrences for this hand in the imported sample.
@@ -1382,26 +1452,22 @@ export function CoinPokerAnalyzer() {
                               return (
                                 <tr
                                   key={occurrence.handId}
-                                  className="odd:bg-white even:bg-zinc-50"
+                                  className="odd:bg-white even:bg-zinc-50/80 hover:bg-emerald-50/50"
                                 >
-                                  <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                                  <td className={`${TABLE_CELL_CLASS} font-mono font-medium`}>
                                     {occurrence.handId}
                                   </td>
-                                  <td className="border-b border-zinc-100 px-3 py-2">
-                                    {occurrence.date}
-                                  </td>
-                                  <td className="border-b border-zinc-100 px-3 py-2">
-                                    {occurrence.position}
-                                  </td>
-                                  <td className="border-b border-zinc-100 px-3 py-2">
+                                  <td className={TABLE_CELL_CLASS}>{occurrence.date}</td>
+                                  <td className={TABLE_CELL_CLASS}>{occurrence.position}</td>
+                                  <td className={TABLE_NUMERIC_CELL_CLASS}>
                                     {formatSignedCurrency(occurrence.profit)}
                                   </td>
-                                  <td className="border-b border-zinc-100 px-3 py-2">
+                                  <td className={TABLE_CELL_CLASS}>
                                     {hand === null ? "-" : formatHeroShowdownStatus(hand)}
                                   </td>
-                                  <td className="border-b border-zinc-100 px-3 py-2">
+                                  <td className={TABLE_CELL_CLASS}>
                                     <button
-                                      className="border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                                      className={SMALL_BUTTON_CLASS}
                                       disabled={hand === null}
                                       type="button"
                                       onClick={() => {
@@ -1425,48 +1491,59 @@ export function CoinPokerAnalyzer() {
               </section>
             ) : null}
 
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xl font-semibold">Leaks</h2>
+            <section className={SECTION_GAP_CLASS}>
+              <SectionHeader title="Leaks" />
               {result.leaks.length > 0 ? (
                 <ul className="grid gap-3">
                   {result.leaks.map((leak) => (
-                    <li key={leak.id} className="border border-zinc-200 bg-white p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-semibold">{leak.title}</h3>
-                        <span className="bg-zinc-100 px-2 py-1 text-xs uppercase text-zinc-600">
-                          {leak.severity}
-                        </span>
-                        <span className="bg-zinc-100 px-2 py-1 text-xs uppercase text-zinc-600">
-                          {leak.category}
-                        </span>
+                    <li key={leak.id} className={`${CARD_CLASS} overflow-hidden`}>
+                      <div className="flex gap-4 p-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200 bg-amber-100 text-amber-800">
+                          <AlertTriangle aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-base font-semibold text-zinc-950">{leak.title}</h3>
+                            <span className="rounded-md bg-amber-100 px-2 py-1 text-[11px] font-bold uppercase text-amber-900 ring-1 ring-amber-200">
+                              Severity: {leak.severity}
+                            </span>
+                            <span className="rounded-md bg-zinc-100 px-2 py-1 text-[11px] font-bold uppercase text-zinc-600 ring-1 ring-zinc-200">
+                              {leak.category}
+                            </span>
+                          </div>
+                          <p className="mt-3 font-mono text-sm text-zinc-700">
+                            {leak.metric}: {formatNumber(leak.value)} / threshold{" "}
+                            {formatNumber(leak.threshold)}
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-zinc-600">{leak.explanation}</p>
+                          <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                              Recommendation
+                            </p>
+                            <p className="mt-1 text-sm font-semibold leading-6 text-zinc-900">
+                              {leak.recommendation}
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                      <p className="mt-2 text-sm text-zinc-700">
-                        {leak.metric}: {formatNumber(leak.value)} / threshold{" "}
-                        {formatNumber(leak.threshold)}
-                      </p>
-                      <p className="mt-2 text-sm text-zinc-600">{leak.explanation}</p>
-                      <p className="mt-1 text-sm font-medium text-zinc-800">
-                        {leak.recommendation}
-                      </p>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="border border-zinc-200 bg-white p-4 text-sm text-zinc-600">
+                <p className={`${CARD_CLASS} p-4 text-sm text-zinc-600`}>
                   No V1 leaks detected, or the sample is too small for guarded leak rules.
                 </p>
               )}
             </section>
 
-            <section className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-xl font-semibold">Hand Explorer</h2>
-                <p className="text-sm text-zinc-600">
-                  Showing {formatNumber(visibleHands.length)} of{" "}
-                  {formatNumber(filteredAndSortedHands.length)} filtered hands.
-                </p>
-              </div>
-              <dl className="grid gap-3 sm:grid-cols-3">
+            <section className={SECTION_GAP_CLASS}>
+              <SectionHeader
+                title="Hand Explorer"
+                description={`Showing ${formatNumber(visibleHands.length)} of ${formatNumber(
+                  filteredAndSortedHands.length,
+                )} filtered hands.`}
+              />
+              <dl className="grid gap-4 sm:grid-cols-3">
                 <StatTile
                   label="Filtered hands"
                   value={formatNumber(handExplorerSummary.handsCount)}
@@ -1480,13 +1557,13 @@ export function CoinPokerAnalyzer() {
                   value={formatSignedNumber(handExplorerSummary.bbPer100)}
                 />
               </dl>
-              <div className="grid gap-3 border border-zinc-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-7">
+              <div className={`${CARD_CLASS} grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-7`}>
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
                     Position
                   </span>
                   <select
-                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    className={CONTROL_CLASS}
                     value={handExplorerFilters.position}
                     onChange={(event) => {
                       setHandExplorerFilters((filters) => ({
@@ -1508,7 +1585,7 @@ export function CoinPokerAnalyzer() {
                     Result
                   </span>
                   <select
-                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    className={CONTROL_CLASS}
                     value={handExplorerFilters.result}
                     onChange={(event) => {
                       setHandExplorerFilters((filters) => ({
@@ -1530,7 +1607,7 @@ export function CoinPokerAnalyzer() {
                     Hero Showdown
                   </span>
                   <select
-                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    className={CONTROL_CLASS}
                     value={handExplorerFilters.showdown}
                     onChange={(event) => {
                       setHandExplorerFilters((filters) => ({
@@ -1552,7 +1629,7 @@ export function CoinPokerAnalyzer() {
                     Hero Cards
                   </span>
                   <input
-                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    className={CONTROL_CLASS}
                     placeholder="AA, AKs, AKo, KJ"
                     type="text"
                     value={handExplorerFilters.heroCardsSearch}
@@ -1570,7 +1647,7 @@ export function CoinPokerAnalyzer() {
                     Date
                   </span>
                   <select
-                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    className={CONTROL_CLASS}
                     value={handExplorerFilters.dateRange}
                     onChange={(event) => {
                       setHandExplorerFilters((filters) => ({
@@ -1592,7 +1669,7 @@ export function CoinPokerAnalyzer() {
                     Sort By
                   </span>
                   <select
-                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    className={CONTROL_CLASS}
                     value={handExplorerSort.key}
                     onChange={(event) => {
                       setHandExplorerSort((sort) => ({
@@ -1614,7 +1691,7 @@ export function CoinPokerAnalyzer() {
                     Direction
                   </span>
                   <select
-                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    className={CONTROL_CLASS}
                     value={handExplorerSort.direction}
                     onChange={(event) => {
                       setHandExplorerSort((sort) => ({
@@ -1632,10 +1709,10 @@ export function CoinPokerAnalyzer() {
                   </select>
                 </label>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 border border-zinc-200 bg-white px-4 py-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm">
                 <div className="flex items-center gap-2">
                   <button
-                    className="border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={BUTTON_CLASS}
                     disabled={handExplorerPageResult.page <= 1}
                     type="button"
                     onClick={() => setHandExplorerPage((page) => Math.max(1, page - 1))}
@@ -1647,7 +1724,7 @@ export function CoinPokerAnalyzer() {
                     {formatNumber(handExplorerPageResult.pageCount)}
                   </span>
                   <button
-                    className="border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={BUTTON_CLASS}
                     disabled={handExplorerPageResult.page >= handExplorerPageResult.pageCount}
                     type="button"
                     onClick={() =>
@@ -1662,7 +1739,7 @@ export function CoinPokerAnalyzer() {
                 <label className="flex items-center gap-2 text-zinc-600">
                   <span>Rows</span>
                   <select
-                    className="border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-950"
+                    className={`${CONTROL_CLASS} h-9 py-0`}
                     value={handExplorerPageSize}
                     onChange={(event) => {
                       setHandExplorerPageSize(Number(event.target.value) as HandExplorerPageSize);
@@ -1677,21 +1754,21 @@ export function CoinPokerAnalyzer() {
                   </select>
                 </label>
               </div>
-              <div className="overflow-x-auto border border-zinc-200 bg-white">
-                <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
-                  <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-600">
+              <div className={TABLE_CONTAINER_CLASS}>
+                <table className={`${TABLE_CLASS} min-w-[1180px]`}>
+                  <thead className={TABLE_HEAD_CLASS}>
                     <tr>
-                      <th className="border-b border-zinc-200 px-3 py-2">Hand ID</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Date</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Table</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Blinds</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Position</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Hero Cards</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Board</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Pot</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Hero Net</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Hero Showdown</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Actions</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Hand ID</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Date</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Table</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Blinds</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Position</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Hero Cards</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Board</th>
+                      <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Pot</th>
+                      <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Hero Net</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Hero Showdown</th>
+                      <th className={TABLE_HEADER_CELL_CLASS}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1706,38 +1783,35 @@ export function CoinPokerAnalyzer() {
                       </tr>
                     ) : (
                       visibleHands.map((hand) => (
-                        <tr key={hand.id} className="odd:bg-white even:bg-zinc-50">
-                          <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                        <tr
+                          key={hand.id}
+                          className="odd:bg-white even:bg-zinc-50/80 hover:bg-emerald-50/50"
+                        >
+                          <td className={`${TABLE_CELL_CLASS} font-mono font-medium`}>
                             {hand.handId}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">{hand.date}</td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
-                            {hand.tableName ?? "-"}
-                          </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={TABLE_CELL_CLASS}>{hand.date}</td>
+                          <td className={TABLE_CELL_CLASS}>{hand.tableName ?? "-"}</td>
+                          <td className={`${TABLE_CELL_CLASS} font-mono tabular-nums`}>
                             {formatStakes(hand)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
-                            {hand.heroPosition}
-                          </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={TABLE_CELL_CLASS}>{hand.heroPosition}</td>
+                          <td className={`${TABLE_CELL_CLASS} font-mono`}>
                             {formatCards(hand.heroCards)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={`${TABLE_CELL_CLASS} font-mono`}>
                             {formatBoard(hand) || "-"}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>
                             {formatNullableCurrency(hand.totalPot)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>
                             {formatSignedCurrency(hand.heroNetResult)}
                           </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
-                            {formatHeroShowdownStatus(hand)}
-                          </td>
-                          <td className="border-b border-zinc-100 px-3 py-2">
+                          <td className={TABLE_CELL_CLASS}>{formatHeroShowdownStatus(hand)}</td>
+                          <td className={TABLE_CELL_CLASS}>
                             <button
-                              className="border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100"
+                              className={SMALL_BUTTON_CLASS}
                               type="button"
                               onClick={() => setSelectedHand(hand)}
                             >
