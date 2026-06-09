@@ -2,12 +2,29 @@
 
 import { useMemo, useState } from "react";
 
+import {
+  didHeroReachShowdown,
+  getFilteredAndSortedHands,
+  getHandExplorerSummary,
+  paginateHands,
+  sortHands,
+  type HandExplorerDateRangeFilter,
+  type HandExplorerFilters,
+  type HandExplorerPageSize,
+  type HandExplorerPositionFilter,
+  type HandExplorerResultFilter,
+  type HandExplorerShowdownFilter,
+  type HandExplorerSort,
+  type HandExplorerSortDirection,
+  type HandExplorerSortKey,
+} from "@/src/lib/handExplorer";
 import { detectLeaks } from "@/src/lib/leaks/detectLeaks";
 import { parseCoinPokerFile } from "@/src/lib/parser/parseCoinPokerFile";
 import { calculateStats } from "@/src/lib/stats/calculateStats";
 import {
   createHoleCardMatrix,
   getHoleCardSampleLabel,
+  type HoleCardOccurrence,
   type HoleCardMatrixCell,
 } from "@/src/lib/stats/holeCardMatrix";
 import {
@@ -15,13 +32,18 @@ import {
   getPositionHighlights,
   getPositionSampleLabel,
 } from "@/src/lib/stats/positionAnalysis";
-import type { LeakResult, PokerHand, StatisticsResult } from "@/src/types";
+import type { HandAction, LeakResult, PokerHand, PokerStreet, StatisticsResult } from "@/src/types";
 
 interface AnalyzerResult {
   readonly fileName: string;
   readonly hands: readonly PokerHand[];
   readonly stats: StatisticsResult;
   readonly leaks: readonly LeakResult[];
+}
+
+interface SelectedHoleCardOccurrenceRow {
+  readonly occurrence: HoleCardOccurrence;
+  readonly hand: PokerHand | null;
 }
 
 type HoleCardMatrixMetric = "bbPer100" | "totalProfit" | "handsPlayed" | "vpipFrequency";
@@ -59,6 +81,65 @@ const HOLE_CARD_LEGEND = [
   },
 ] as const;
 
+const DEFAULT_HAND_EXPLORER_FILTERS: HandExplorerFilters = {
+  position: "All",
+  result: "All",
+  showdown: "All",
+  dateRange: "All hands",
+  heroCardsSearch: "",
+};
+
+const POSITION_FILTER_OPTIONS: readonly HandExplorerPositionFilter[] = [
+  "All",
+  "UTG",
+  "HJ",
+  "CO",
+  "BTN",
+  "SB",
+  "BB",
+];
+const RESULT_FILTER_OPTIONS: readonly HandExplorerResultFilter[] = [
+  "All",
+  "Won",
+  "Lost",
+  "Break-even",
+];
+const SHOWDOWN_FILTER_OPTIONS: readonly HandExplorerShowdownFilter[] = [
+  "All",
+  "Showdown",
+  "No Showdown",
+];
+const DATE_RANGE_FILTER_OPTIONS: readonly HandExplorerDateRangeFilter[] = [
+  "Today",
+  "Yesterday",
+  "Last 7 days",
+  "Last 30 days",
+  "All hands",
+];
+const HAND_EXPLORER_SORT_OPTIONS: readonly {
+  readonly label: string;
+  readonly value: HandExplorerSortKey;
+}[] = [
+  { label: "Date", value: "date" },
+  { label: "Hero Net", value: "heroNet" },
+  { label: "Pot", value: "pot" },
+  { label: "Position", value: "position" },
+];
+const HAND_EXPLORER_SORT_DIRECTION_OPTIONS: readonly {
+  readonly label: string;
+  readonly value: HandExplorerSortDirection;
+}[] = [
+  { label: "↓ Descending", value: "desc" },
+  { label: "↑ Ascending", value: "asc" },
+];
+const HAND_EXPLORER_PAGE_SIZE_OPTIONS: readonly HandExplorerPageSize[] = [25, 50, 100];
+const STREET_LABELS: Readonly<Record<PokerStreet, string>> = {
+  preflop: "Preflop",
+  flop: "Flop",
+  turn: "Turn",
+  river: "River",
+};
+
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 2,
@@ -92,6 +173,39 @@ function formatBoard(hand: PokerHand): string {
     ...(hand.board.turn === null ? [] : [hand.board.turn]),
     ...(hand.board.river === null ? [] : [hand.board.river]),
   ].join(" ");
+}
+
+function formatStakes(hand: PokerHand): string {
+  return `${formatCurrency(hand.stakes.smallBlind)} / ${formatCurrency(hand.stakes.bigBlind)}`;
+}
+
+function formatNullableCurrency(value: number | null): string {
+  return value === null ? "-" : formatCurrency(value);
+}
+
+function formatHeroShowdownStatus(hand: PokerHand): string {
+  return didHeroReachShowdown(hand) ? "Yes" : "No";
+}
+
+function formatActionType(type: HandAction["type"]): string {
+  return type.replaceAll("_", " ");
+}
+
+function formatActionDetail(action: HandAction): string {
+  const details = [
+    action.amount === null ? null : `Amount ${formatCurrency(action.amount)}`,
+    action.raiseTo === null ? null : `Raise to ${formatCurrency(action.raiseTo)}`,
+  ].filter((value): value is string => value !== null);
+
+  return details.length === 0 ? "-" : details.join(" | ");
+}
+
+function getShowdownResult(hand: PokerHand, playerName: string, wonAmount: number): string {
+  if (wonAmount > 0 || hand.showdown?.winnerNames.includes(playerName)) {
+    return "Won";
+  }
+
+  return "Lost";
 }
 
 function getWinRate(cell: HoleCardMatrixCell): number {
@@ -252,15 +366,242 @@ function PositionHighlight({
   );
 }
 
+function HandDetailPanel({
+  hand,
+  onClose,
+}: Readonly<{
+  hand: PokerHand;
+  onClose: () => void;
+}>) {
+  const boardCards = formatBoard(hand);
+
+  return (
+    <div
+      aria-label={`Hand ${hand.handId} detail`}
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex justify-end bg-zinc-950/40"
+      role="dialog"
+    >
+      <div className="flex h-full w-full max-w-4xl flex-col overflow-y-auto bg-white shadow-xl">
+        <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white px-5 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                Hand Detail
+              </p>
+              <h2 className="mt-1 text-xl font-semibold text-zinc-950">{hand.handId}</h2>
+              <p className="mt-1 text-sm text-zinc-600">{hand.date}</p>
+            </div>
+            <button
+              className="border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
+              type="button"
+              onClick={onClose}
+            >
+              Close
+            </button>
+          </div>
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-zinc-500">Stakes</dt>
+              <dd className="mt-1 font-semibold">{formatStakes(hand)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-zinc-500">Table</dt>
+              <dd className="mt-1 font-semibold">{hand.tableName ?? "-"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero cards</dt>
+              <dd className="mt-1 font-semibold">{formatCards(hand.heroCards)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero position</dt>
+              <dd className="mt-1 font-semibold">{hand.heroPosition}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero net</dt>
+              <dd className="mt-1 font-semibold">{formatSignedCurrency(hand.heroNetResult)}</dd>
+            </div>
+          </dl>
+        </header>
+
+        <div className="flex flex-col gap-6 px-5 py-5">
+          <section className="flex flex-col gap-3">
+            <h3 className="text-lg font-semibold">Players</h3>
+            <div className="overflow-x-auto border border-zinc-200">
+              <table className="w-full min-w-[560px] border-collapse text-left text-sm">
+                <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-600">
+                  <tr>
+                    <th className="border-b border-zinc-200 px-3 py-2">Seat</th>
+                    <th className="border-b border-zinc-200 px-3 py-2">Player</th>
+                    <th className="border-b border-zinc-200 px-3 py-2">Stack</th>
+                    <th className="border-b border-zinc-200 px-3 py-2">Hero</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hand.players.map((player) => (
+                    <tr key={player.seat} className="odd:bg-white even:bg-zinc-50">
+                      <td className="border-b border-zinc-100 px-3 py-2">{player.seat}</td>
+                      <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                        {player.name}
+                      </td>
+                      <td className="border-b border-zinc-100 px-3 py-2">
+                        {formatCurrency(player.startingStack)}
+                      </td>
+                      <td className="border-b border-zinc-100 px-3 py-2">
+                        {player.isHero ? "Hero" : "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-lg font-semibold">Board</h3>
+            <div className="grid gap-3 text-sm sm:grid-cols-3">
+              <div className="border border-zinc-200 bg-zinc-50 p-3">
+                <dt className="text-xs uppercase tracking-wide text-zinc-500">Flop</dt>
+                <dd className="mt-1 font-semibold">{formatCards(hand.board.flop)}</dd>
+              </div>
+              <div className="border border-zinc-200 bg-zinc-50 p-3">
+                <dt className="text-xs uppercase tracking-wide text-zinc-500">Turn</dt>
+                <dd className="mt-1 font-semibold">{hand.board.turn ?? "-"}</dd>
+              </div>
+              <div className="border border-zinc-200 bg-zinc-50 p-3">
+                <dt className="text-xs uppercase tracking-wide text-zinc-500">River</dt>
+                <dd className="mt-1 font-semibold">{hand.board.river ?? "-"}</dd>
+              </div>
+            </div>
+            <p className="text-sm text-zinc-600">Full board: {boardCards || "-"}</p>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-lg font-semibold">Action Timeline</h3>
+            {(["preflop", "flop", "turn", "river"] as const).map((street) => (
+              <div key={street} className="border border-zinc-200">
+                <h4 className="border-b border-zinc-200 bg-zinc-100 px-3 py-2 text-sm font-semibold">
+                  {STREET_LABELS[street]}
+                </h4>
+                {hand.streetActions[street].length === 0 ? (
+                  <p className="px-3 py-3 text-sm text-zinc-600">No actions recorded.</p>
+                ) : (
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="text-xs uppercase tracking-wide text-zinc-500">
+                      <tr>
+                        <th className="border-b border-zinc-100 px-3 py-2">Player</th>
+                        <th className="border-b border-zinc-100 px-3 py-2">Action</th>
+                        <th className="border-b border-zinc-100 px-3 py-2">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hand.streetActions[street].map((action) => (
+                        <tr
+                          key={`${action.street}-${action.order}`}
+                          className="odd:bg-white even:bg-zinc-50"
+                        >
+                          <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                            {action.playerName}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2 capitalize">
+                            {formatActionType(action.type)}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {formatActionDetail(action)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-lg font-semibold">Showdown</h3>
+            {hand.showdown === null || hand.showdown.entries.length === 0 ? (
+              <p className="border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+                No visible showdown entries.
+              </p>
+            ) : (
+              <div className="overflow-x-auto border border-zinc-200">
+                <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+                  <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-600">
+                    <tr>
+                      <th className="border-b border-zinc-200 px-3 py-2">Player</th>
+                      <th className="border-b border-zinc-200 px-3 py-2">Cards</th>
+                      <th className="border-b border-zinc-200 px-3 py-2">Result</th>
+                      <th className="border-b border-zinc-200 px-3 py-2">Collected</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hand.showdown.entries.map((entry) => (
+                      <tr key={entry.playerName} className="odd:bg-white even:bg-zinc-50">
+                        <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                          {entry.playerName}
+                        </td>
+                        <td className="border-b border-zinc-100 px-3 py-2">
+                          {formatCards(entry.cards)}
+                        </td>
+                        <td className="border-b border-zinc-100 px-3 py-2">
+                          {getShowdownResult(hand, entry.playerName, entry.wonAmount)}
+                          {entry.handDescription === null ? "" : ` (${entry.handDescription})`}
+                        </td>
+                        <td className="border-b border-zinc-100 px-3 py-2">
+                          {formatCurrency(entry.wonAmount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CoinPokerAnalyzer() {
   const [result, setResult] = useState<AnalyzerResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
   const [selectedHoleCard, setSelectedHoleCard] = useState<string | null>(null);
+  const [selectedHand, setSelectedHand] = useState<PokerHand | null>(null);
+  const [handExplorerFilters, setHandExplorerFilters] = useState<HandExplorerFilters>(
+    DEFAULT_HAND_EXPLORER_FILTERS,
+  );
+  const [handExplorerSort, setHandExplorerSort] = useState<HandExplorerSort>({
+    key: "date",
+    direction: "desc",
+  });
+  const [handExplorerPage, setHandExplorerPage] = useState(1);
+  const [handExplorerPageSize, setHandExplorerPageSize] = useState<HandExplorerPageSize>(25);
   const [holeCardMatrixMetric, setHoleCardMatrixMetric] =
     useState<HoleCardMatrixMetric>("bbPer100");
 
-  const firstHands = useMemo(() => result?.hands.slice(0, 10) ?? [], [result]);
+  const filteredAndSortedHands = useMemo(
+    () =>
+      result === null
+        ? []
+        : getFilteredAndSortedHands(result.hands, handExplorerFilters, handExplorerSort),
+    [handExplorerFilters, handExplorerSort, result],
+  );
+  const handExplorerSummary = useMemo(
+    () => getHandExplorerSummary(filteredAndSortedHands),
+    [filteredAndSortedHands],
+  );
+  const handExplorerPageResult = useMemo(
+    () =>
+      paginateHands(filteredAndSortedHands, {
+        page: handExplorerPage,
+        pageSize: handExplorerPageSize,
+      }),
+    [filteredAndSortedHands, handExplorerPage, handExplorerPageSize],
+  );
+  const visibleHands = handExplorerPageResult.hands;
   const holeCardMatrix = useMemo(
     () => (result === null ? null : createHoleCardMatrix(result.hands)),
     [result],
@@ -269,6 +610,30 @@ export function CoinPokerAnalyzer() {
     holeCardMatrix === null || selectedHoleCard === null
       ? null
       : (holeCardMatrix.cells[selectedHoleCard] ?? null);
+  const selectedHoleCardOccurrences = useMemo<readonly SelectedHoleCardOccurrenceRow[]>(() => {
+    if (result === null || selectedHoleCardCell === null) {
+      return [];
+    }
+
+    const occurrenceByHandId = new Map(
+      selectedHoleCardCell.occurrences.map((occurrence) => [occurrence.handId, occurrence]),
+    );
+    const sortedHands = sortHands(
+      result.hands.filter((hand) => occurrenceByHandId.has(hand.handId)),
+      { key: "date", direction: "desc" },
+    );
+    const sortedHandIds = new Set(sortedHands.map((hand) => hand.handId));
+    const sortedRows = sortedHands.flatMap((hand): SelectedHoleCardOccurrenceRow[] => {
+      const occurrence = occurrenceByHandId.get(hand.handId);
+
+      return occurrence === undefined ? [] : [{ occurrence, hand }];
+    });
+    const missingRows = selectedHoleCardCell.occurrences
+      .filter((occurrence) => !sortedHandIds.has(occurrence.handId))
+      .map((occurrence) => ({ occurrence, hand: null }));
+
+    return [...sortedRows, ...missingRows];
+  }, [result, selectedHoleCardCell]);
   const positionStats = useMemo(
     () => (result === null ? [] : getDisplayPositionStats(result.stats)),
     [result],
@@ -287,6 +652,11 @@ export function CoinPokerAnalyzer() {
     setError(null);
     setResult(null);
     setSelectedHoleCard(null);
+    setSelectedHand(null);
+    setHandExplorerFilters(DEFAULT_HAND_EXPLORER_FILTERS);
+    setHandExplorerSort({ key: "date", direction: "desc" });
+    setHandExplorerPage(1);
+    setHandExplorerPageSize(25);
 
     if (file === undefined) {
       return;
@@ -539,15 +909,17 @@ export function CoinPokerAnalyzer() {
                   <div className="border border-zinc-200 bg-white p-4">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
-                        <h3 className="text-lg font-semibold">{selectedHoleCardCell.notation}</h3>
+                        <h3 className="text-lg font-semibold">
+                          Selected Hand: {selectedHoleCardCell.notation}
+                        </h3>
                         <p className="mt-1 text-sm text-zinc-600">
                           {getHoleCardSampleLabel(selectedHoleCardCell.handsPlayed)}
                         </p>
                       </div>
-                      <dl className="grid gap-3 text-sm sm:grid-cols-3 lg:grid-cols-5">
+                      <dl className="grid gap-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
                         <div>
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">
-                            Hands played
+                            Hands Played
                           </dt>
                           <dd className="mt-1 font-semibold">
                             {formatNumber(selectedHoleCardCell.handsPlayed)}
@@ -563,14 +935,6 @@ export function CoinPokerAnalyzer() {
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">BB/100</dt>
                           <dd className="mt-1 font-semibold">
                             {formatConfidentBbPer100(selectedHoleCardCell)}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-xs uppercase tracking-wide text-zinc-500">
-                            VPIP count
-                          </dt>
-                          <dd className="mt-1 font-semibold">
-                            {formatNumber(selectedHoleCardCell.vpipCount)}
                           </dd>
                         </div>
                         <div>
@@ -591,36 +955,60 @@ export function CoinPokerAnalyzer() {
                             <th className="border-b border-zinc-200 px-3 py-2">Hand ID</th>
                             <th className="border-b border-zinc-200 px-3 py-2">Date</th>
                             <th className="border-b border-zinc-200 px-3 py-2">Position</th>
-                            <th className="border-b border-zinc-200 px-3 py-2">Profit</th>
+                            <th className="border-b border-zinc-200 px-3 py-2">Hero Net</th>
+                            <th className="border-b border-zinc-200 px-3 py-2">Hero Showdown</th>
+                            <th className="border-b border-zinc-200 px-3 py-2">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {selectedHoleCardCell.occurrences.length === 0 ? (
+                          {selectedHoleCardOccurrences.length === 0 ? (
                             <tr>
                               <td
                                 className="border-b border-zinc-100 px-3 py-3 text-zinc-600"
-                                colSpan={4}
+                                colSpan={6}
                               >
                                 No occurrences for this hand in the imported sample.
                               </td>
                             </tr>
                           ) : (
-                            selectedHoleCardCell.occurrences.map((occurrence) => (
-                              <tr key={occurrence.handId} className="odd:bg-white even:bg-zinc-50">
-                                <td className="border-b border-zinc-100 px-3 py-2 font-medium">
-                                  {occurrence.handId}
-                                </td>
-                                <td className="border-b border-zinc-100 px-3 py-2">
-                                  {occurrence.date}
-                                </td>
-                                <td className="border-b border-zinc-100 px-3 py-2">
-                                  {occurrence.position}
-                                </td>
-                                <td className="border-b border-zinc-100 px-3 py-2">
-                                  {formatSignedCurrency(occurrence.profit)}
-                                </td>
-                              </tr>
-                            ))
+                            selectedHoleCardOccurrences.map(({ occurrence, hand }) => {
+                              return (
+                                <tr
+                                  key={occurrence.handId}
+                                  className="odd:bg-white even:bg-zinc-50"
+                                >
+                                  <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                                    {occurrence.handId}
+                                  </td>
+                                  <td className="border-b border-zinc-100 px-3 py-2">
+                                    {occurrence.date}
+                                  </td>
+                                  <td className="border-b border-zinc-100 px-3 py-2">
+                                    {occurrence.position}
+                                  </td>
+                                  <td className="border-b border-zinc-100 px-3 py-2">
+                                    {formatSignedCurrency(occurrence.profit)}
+                                  </td>
+                                  <td className="border-b border-zinc-100 px-3 py-2">
+                                    {hand === null ? "-" : formatHeroShowdownStatus(hand)}
+                                  </td>
+                                  <td className="border-b border-zinc-100 px-3 py-2">
+                                    <button
+                                      className="border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+                                      disabled={hand === null}
+                                      type="button"
+                                      onClick={() => {
+                                        if (hand !== null) {
+                                          setSelectedHand(hand);
+                                        }
+                                      }}
+                                    >
+                                      View
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
                           )}
                         </tbody>
                       </table>
@@ -664,55 +1052,294 @@ export function CoinPokerAnalyzer() {
             </section>
 
             <section className="flex flex-col gap-3">
-              <h2 className="text-xl font-semibold">First 10 parsed hands</h2>
+              <div className="flex flex-col gap-1">
+                <h2 className="text-xl font-semibold">Hand Explorer</h2>
+                <p className="text-sm text-zinc-600">
+                  Showing {formatNumber(visibleHands.length)} of{" "}
+                  {formatNumber(filteredAndSortedHands.length)} filtered hands.
+                </p>
+              </div>
+              <dl className="grid gap-3 sm:grid-cols-3">
+                <StatTile
+                  label="Filtered hands"
+                  value={formatNumber(handExplorerSummary.handsCount)}
+                />
+                <StatTile
+                  label="Filtered profit"
+                  value={formatSignedCurrency(handExplorerSummary.totalProfit)}
+                />
+                <StatTile
+                  label="Average filtered BB/100"
+                  value={formatSignedNumber(handExplorerSummary.bbPer100)}
+                />
+              </dl>
+              <div className="grid gap-3 border border-zinc-200 bg-white p-4 md:grid-cols-2 xl:grid-cols-7">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Position
+                  </span>
+                  <select
+                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    value={handExplorerFilters.position}
+                    onChange={(event) => {
+                      setHandExplorerFilters((filters) => ({
+                        ...filters,
+                        position: event.target.value as HandExplorerPositionFilter,
+                      }));
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    {POSITION_FILTER_OPTIONS.map((position) => (
+                      <option key={position} value={position}>
+                        {position}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Result
+                  </span>
+                  <select
+                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    value={handExplorerFilters.result}
+                    onChange={(event) => {
+                      setHandExplorerFilters((filters) => ({
+                        ...filters,
+                        result: event.target.value as HandExplorerResultFilter,
+                      }));
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    {RESULT_FILTER_OPTIONS.map((resultFilter) => (
+                      <option key={resultFilter} value={resultFilter}>
+                        {resultFilter}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Hero Showdown
+                  </span>
+                  <select
+                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    value={handExplorerFilters.showdown}
+                    onChange={(event) => {
+                      setHandExplorerFilters((filters) => ({
+                        ...filters,
+                        showdown: event.target.value as HandExplorerShowdownFilter,
+                      }));
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    {SHOWDOWN_FILTER_OPTIONS.map((showdownFilter) => (
+                      <option key={showdownFilter} value={showdownFilter}>
+                        {showdownFilter}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Hero Cards
+                  </span>
+                  <input
+                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    placeholder="AA, AKs, AKo, KJ"
+                    type="text"
+                    value={handExplorerFilters.heroCardsSearch}
+                    onChange={(event) => {
+                      setHandExplorerFilters((filters) => ({
+                        ...filters,
+                        heroCardsSearch: event.target.value,
+                      }));
+                      setHandExplorerPage(1);
+                    }}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Date
+                  </span>
+                  <select
+                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    value={handExplorerFilters.dateRange}
+                    onChange={(event) => {
+                      setHandExplorerFilters((filters) => ({
+                        ...filters,
+                        dateRange: event.target.value as HandExplorerDateRangeFilter,
+                      }));
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    {DATE_RANGE_FILTER_OPTIONS.map((dateRange) => (
+                      <option key={dateRange} value={dateRange}>
+                        {dateRange}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Sort By
+                  </span>
+                  <select
+                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    value={handExplorerSort.key}
+                    onChange={(event) => {
+                      setHandExplorerSort((sort) => ({
+                        ...sort,
+                        key: event.target.value as HandExplorerSortKey,
+                      }));
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    {HAND_EXPLORER_SORT_OPTIONS.map((sortOption) => (
+                      <option key={sortOption.value} value={sortOption.value}>
+                        {sortOption.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Direction
+                  </span>
+                  <select
+                    className="border border-zinc-300 bg-white px-2 py-2 text-sm"
+                    value={handExplorerSort.direction}
+                    onChange={(event) => {
+                      setHandExplorerSort((sort) => ({
+                        ...sort,
+                        direction: event.target.value as HandExplorerSortDirection,
+                      }));
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    {HAND_EXPLORER_SORT_DIRECTION_OPTIONS.map((sortDirection) => (
+                      <option key={sortDirection.value} value={sortDirection.value}>
+                        {sortDirection.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border border-zinc-200 bg-white px-4 py-3 text-sm">
+                <div className="flex items-center gap-2">
+                  <button
+                    className="border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={handExplorerPageResult.page <= 1}
+                    type="button"
+                    onClick={() => setHandExplorerPage((page) => Math.max(1, page - 1))}
+                  >
+                    Previous
+                  </button>
+                  <span className="text-zinc-600">
+                    Page {formatNumber(handExplorerPageResult.page)} of{" "}
+                    {formatNumber(handExplorerPageResult.pageCount)}
+                  </span>
+                  <button
+                    className="border border-zinc-300 px-3 py-1.5 font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={handExplorerPageResult.page >= handExplorerPageResult.pageCount}
+                    type="button"
+                    onClick={() =>
+                      setHandExplorerPage((page) =>
+                        Math.min(handExplorerPageResult.pageCount, page + 1),
+                      )
+                    }
+                  >
+                    Next
+                  </button>
+                </div>
+                <label className="flex items-center gap-2 text-zinc-600">
+                  <span>Rows</span>
+                  <select
+                    className="border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-950"
+                    value={handExplorerPageSize}
+                    onChange={(event) => {
+                      setHandExplorerPageSize(Number(event.target.value) as HandExplorerPageSize);
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    {HAND_EXPLORER_PAGE_SIZE_OPTIONS.map((pageSize) => (
+                      <option key={pageSize} value={pageSize}>
+                        {pageSize}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <div className="overflow-x-auto border border-zinc-200 bg-white">
-                <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
                   <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-600">
                     <tr>
                       <th className="border-b border-zinc-200 px-3 py-2">Hand ID</th>
                       <th className="border-b border-zinc-200 px-3 py-2">Date</th>
                       <th className="border-b border-zinc-200 px-3 py-2">Table</th>
                       <th className="border-b border-zinc-200 px-3 py-2">Blinds</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Hero seat</th>
                       <th className="border-b border-zinc-200 px-3 py-2">Position</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Hero cards</th>
+                      <th className="border-b border-zinc-200 px-3 py-2">Hero Cards</th>
                       <th className="border-b border-zinc-200 px-3 py-2">Board</th>
                       <th className="border-b border-zinc-200 px-3 py-2">Pot</th>
-                      <th className="border-b border-zinc-200 px-3 py-2">Hero net</th>
+                      <th className="border-b border-zinc-200 px-3 py-2">Hero Net</th>
+                      <th className="border-b border-zinc-200 px-3 py-2">Hero Showdown</th>
+                      <th className="border-b border-zinc-200 px-3 py-2">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {firstHands.map((hand) => (
-                      <tr key={hand.id} className="odd:bg-white even:bg-zinc-50">
-                        <td className="border-b border-zinc-100 px-3 py-2 font-medium">
-                          {hand.handId}
-                        </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">{hand.date}</td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
-                          {hand.tableName ?? "-"}
-                        </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
-                          {formatCurrency(hand.stakes.smallBlind)} /{" "}
-                          {formatCurrency(hand.stakes.bigBlind)}
-                        </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
-                          {hand.heroSeat ?? "-"}
-                        </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">{hand.heroPosition}</td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
-                          {formatCards(hand.heroCards)}
-                        </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
-                          {formatBoard(hand) || "-"}
-                        </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
-                          {hand.totalPot === null ? "-" : formatCurrency(hand.totalPot)}
-                        </td>
-                        <td className="border-b border-zinc-100 px-3 py-2">
-                          {formatCurrency(hand.heroNetResult)}
+                    {visibleHands.length === 0 ? (
+                      <tr>
+                        <td
+                          className="border-b border-zinc-100 px-3 py-3 text-zinc-600"
+                          colSpan={11}
+                        >
+                          No hands match the current filters.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      visibleHands.map((hand) => (
+                        <tr key={hand.id} className="odd:bg-white even:bg-zinc-50">
+                          <td className="border-b border-zinc-100 px-3 py-2 font-medium">
+                            {hand.handId}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">{hand.date}</td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {hand.tableName ?? "-"}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {formatStakes(hand)}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {hand.heroPosition}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {formatCards(hand.heroCards)}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {formatBoard(hand) || "-"}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {formatNullableCurrency(hand.totalPot)}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {formatSignedCurrency(hand.heroNetResult)}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            {formatHeroShowdownStatus(hand)}
+                          </td>
+                          <td className="border-b border-zinc-100 px-3 py-2">
+                            <button
+                              className="border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100"
+                              type="button"
+                              onClick={() => setSelectedHand(hand)}
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -720,6 +1347,9 @@ export function CoinPokerAnalyzer() {
           </>
         ) : null}
       </div>
+      {selectedHand === null ? null : (
+        <HandDetailPanel hand={selectedHand} onClose={() => setSelectedHand(null)} />
+      )}
     </main>
   );
 }
