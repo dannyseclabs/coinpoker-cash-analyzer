@@ -140,6 +140,85 @@ const STREET_LABELS: Readonly<Record<PokerStreet, string>> = {
   river: "River",
 };
 
+type SummaryMetricLabel =
+  | "Parsed hands"
+  | "Total profit"
+  | "BB/100"
+  | "VPIP"
+  | "PFR"
+  | "3Bet"
+  | "Limp"
+  | "CBet Flop"
+  | "WTSD"
+  | "W$SD";
+
+interface SummaryExplanation {
+  readonly fullName: string;
+  readonly explanation: string;
+  readonly interpretation: string;
+}
+
+type MetricStatusTone = "good" | "caution" | "bad";
+
+interface MetricStatus {
+  readonly label: string;
+  readonly tone: MetricStatusTone;
+  readonly tooltip: string;
+}
+
+const SUMMARY_EXPLANATIONS: Readonly<Record<SummaryMetricLabel, SummaryExplanation>> = {
+  "Parsed hands": {
+    fullName: "Parsed Hands",
+    explanation: "The number of supported CoinPoker hands found in the uploaded file.",
+    interpretation: "More hands give more reliable stats; tiny samples can swing wildly.",
+  },
+  "Total profit": {
+    fullName: "Total Profit",
+    explanation: "Hero's total net result across all parsed hands.",
+    interpretation: "Positive means Hero won overall; negative means Hero lost overall.",
+  },
+  "BB/100": {
+    fullName: "Big Blinds per 100 Hands",
+    explanation: "Hero's win rate normalized to 100 hands using the table big blind.",
+    interpretation: "Higher is better; use large samples before trusting this number.",
+  },
+  VPIP: {
+    fullName: "Voluntarily Put Money In Pot",
+    explanation: "Shows how often Hero voluntarily plays a hand preflop.",
+    interpretation: "Higher means looser; lower means tighter.",
+  },
+  PFR: {
+    fullName: "Preflop Raise",
+    explanation: "Shows how often Hero enters preflop with a raise.",
+    interpretation: "Healthy PFR usually stays reasonably close to VPIP.",
+  },
+  "3Bet": {
+    fullName: "Three-Bet",
+    explanation: "Shows how often Hero re-raises after an earlier preflop raise.",
+    interpretation: "Low can be too passive; high can be aggressive or opponent-dependent.",
+  },
+  Limp: {
+    fullName: "Limp",
+    explanation: "Shows how often Hero calls the big blind preflop instead of raising or folding.",
+    interpretation: "Lower is usually better in most 6-max cash strategies.",
+  },
+  "CBet Flop": {
+    fullName: "Continuation Bet Flop",
+    explanation: "Shows how often Hero bets the flop after being the preflop raiser.",
+    interpretation: "Too low can miss pressure spots; too high can become predictable.",
+  },
+  WTSD: {
+    fullName: "Went To Showdown",
+    explanation: "Shows how often Hero reaches showdown after seeing the flop.",
+    interpretation: "Very high can mean calling too much with weak hands.",
+  },
+  W$SD: {
+    fullName: "Won Money at Showdown",
+    explanation: "Shows how often Hero wins money when reaching showdown.",
+    interpretation: "Higher is better, but very high with low WTSD may mean over-folding.",
+  },
+};
+
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 2,
@@ -206,6 +285,258 @@ function getShowdownResult(hand: PokerHand, playerName: string, wonAmount: numbe
   }
 
   return "Lost";
+}
+
+function createMetricStatus(label: string, tone: MetricStatusTone, tooltip: string): MetricStatus {
+  return {
+    label,
+    tone,
+    tooltip,
+  };
+}
+
+function getStatusToneClass(tone: MetricStatusTone): string {
+  if (tone === "good") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  }
+
+  if (tone === "caution") {
+    return "border-amber-200 bg-amber-50 text-amber-800";
+  }
+
+  return "border-red-200 bg-red-50 text-red-800";
+}
+
+function getBbPer100Status(bbPer100: number): MetricStatus {
+  if (bbPer100 < -1) {
+    return createMetricStatus(
+      "Losing",
+      "bad",
+      "BB/100 below -1 means Hero is currently losing more than one big blind per 100 hands.",
+    );
+  }
+
+  if (bbPer100 < 1) {
+    return createMetricStatus(
+      "Breakeven",
+      "caution",
+      "BB/100 between -1 and 1 is roughly breakeven; sample size can easily move it.",
+    );
+  }
+
+  if (bbPer100 < 8) {
+    return createMetricStatus(
+      "Winning",
+      "good",
+      "BB/100 from 1 to 8 suggests Hero is winning, assuming the sample is large enough.",
+    );
+  }
+
+  return createMetricStatus(
+    "Crushing",
+    "good",
+    "BB/100 above 8 is a very strong win rate; confirm it with a large hand sample.",
+  );
+}
+
+function getVpipStatus(vpip: number): MetricStatus {
+  if (vpip < 20) {
+    return createMetricStatus(
+      "Tight",
+      "caution",
+      "VPIP below 20% is tight for 6-max cash and may mean Hero is passing up playable hands.",
+    );
+  }
+
+  if (vpip <= 28) {
+    return createMetricStatus(
+      "Normal",
+      "good",
+      "VPIP from 20% to 28% is a common healthy 6-max cash range.",
+    );
+  }
+
+  if (vpip <= 35) {
+    return createMetricStatus(
+      "Loose",
+      "caution",
+      "VPIP from 28% to 35% is loose and needs disciplined postflop play.",
+    );
+  }
+
+  return createMetricStatus(
+    "Very Loose",
+    "bad",
+    "VPIP above 35% is very loose and often means Hero is playing too many weak hands.",
+  );
+}
+
+function getPfrStatus(pfr: number): MetricStatus {
+  if (pfr < 15) {
+    return createMetricStatus(
+      "Passive",
+      "caution",
+      "PFR below 15% is passive for 6-max cash and can mean too much calling preflop.",
+    );
+  }
+
+  if (pfr <= 24) {
+    return createMetricStatus(
+      "Normal",
+      "good",
+      "PFR from 15% to 24% is a common healthy 6-max cash range.",
+    );
+  }
+
+  return createMetricStatus(
+    "Aggressive",
+    "caution",
+    "PFR above 24% is aggressive and can be profitable only with good hand selection.",
+  );
+}
+
+function getThreeBetStatus(threeBet: number): MetricStatus {
+  if (threeBet < 5) {
+    return createMetricStatus(
+      "Low",
+      "caution",
+      "3Bet below 5% is low and may indicate Hero is not re-raising enough strong hands.",
+    );
+  }
+
+  if (threeBet <= 10) {
+    return createMetricStatus(
+      "Normal",
+      "good",
+      "3Bet from 5% to 10% is a common solid 6-max cash range.",
+    );
+  }
+
+  return createMetricStatus(
+    "High",
+    "caution",
+    "3Bet above 10% is high and needs good opponent selection to avoid over-aggression.",
+  );
+}
+
+function getLimpStatus(limp: number): MetricStatus {
+  if (limp < 3) {
+    return createMetricStatus(
+      "Low",
+      "good",
+      "Limp below 3% is low, which is usually healthy in 6-max cash games.",
+    );
+  }
+
+  if (limp <= 8) {
+    return createMetricStatus(
+      "Moderate",
+      "caution",
+      "Limp from 3% to 8% is moderate; check whether calls should be raises or folds.",
+    );
+  }
+
+  return createMetricStatus(
+    "High",
+    "bad",
+    "Limp above 8% is high and often indicates too much passive preflop play.",
+  );
+}
+
+function getCBetFlopStatus(cBetFlop: number): MetricStatus {
+  if (cBetFlop < 45) {
+    return createMetricStatus(
+      "Low",
+      "caution",
+      "Flop CBet below 45% is low and may mean Hero is missing profitable pressure spots.",
+    );
+  }
+
+  if (cBetFlop <= 65) {
+    return createMetricStatus(
+      "Normal",
+      "good",
+      "Flop CBet from 45% to 65% is a common balanced cash-game range.",
+    );
+  }
+
+  if (cBetFlop <= 80) {
+    return createMetricStatus(
+      "High",
+      "caution",
+      "Flop CBet from 65% to 80% is high and may become exploitable against callers.",
+    );
+  }
+
+  return createMetricStatus(
+    "Overcbetting",
+    "bad",
+    "Flop CBet above 80% often means Hero is betting too many weak flops.",
+  );
+}
+
+function getWtsdStatus(wtsd: number): MetricStatus {
+  if (wtsd < 22) {
+    return createMetricStatus(
+      "Low",
+      "caution",
+      "WTSD below 22% can mean Hero is folding too often before showdown.",
+    );
+  }
+
+  if (wtsd <= 30) {
+    return createMetricStatus(
+      "Normal",
+      "good",
+      "WTSD from 22% to 30% is a common healthy cash-game range.",
+    );
+  }
+
+  if (wtsd <= 50) {
+    return createMetricStatus(
+      "High",
+      "caution",
+      "WTSD from 30% to 50% is high and can indicate too much showdown curiosity.",
+    );
+  }
+
+  return createMetricStatus(
+    "Very High",
+    "bad",
+    "WTSD above 50% often indicates calling too many marginal hands to showdown.",
+  );
+}
+
+function getWsdStatus(wsd: number): MetricStatus {
+  if (wsd < 45) {
+    return createMetricStatus(
+      "Poor",
+      "bad",
+      "W$SD below 45% means Hero is losing too often when reaching showdown.",
+    );
+  }
+
+  if (wsd <= 55) {
+    return createMetricStatus(
+      "Normal",
+      "good",
+      "W$SD from 45% to 55% is a common normal showdown result range.",
+    );
+  }
+
+  if (wsd <= 60) {
+    return createMetricStatus(
+      "Strong",
+      "good",
+      "W$SD from 55% to 60% is strong, especially with a normal WTSD.",
+    );
+  }
+
+  return createMetricStatus(
+    "Elite",
+    "good",
+    "W$SD above 60% is elite, but may also reflect a small sample or very selective showdowns.",
+  );
 }
 
 function getWinRate(cell: HoleCardMatrixCell): number {
@@ -332,14 +663,42 @@ function validateFileContent(file: File, text: string): string | null {
 function StatTile({
   label,
   value,
+  explanation,
+  status,
 }: Readonly<{
   label: string;
   value: string;
+  explanation?: SummaryExplanation;
+  status?: MetricStatus;
 }>) {
   return (
     <div className="border border-zinc-200 bg-white p-4">
-      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dt className="flex items-start justify-between gap-3 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <span>{label}</span>
+        {status === undefined ? null : (
+          <span
+            className={`rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-normal ${getStatusToneClass(
+              status.tone,
+            )}`}
+            title={status.tooltip}
+          >
+            {status.label}
+          </span>
+        )}
+      </dt>
       <dd className="mt-2 text-2xl font-semibold text-zinc-950">{value}</dd>
+      {explanation === undefined ? null : (
+        <details className="mt-3 text-xs text-zinc-600">
+          <summary className="cursor-pointer font-medium text-zinc-700 transition hover:text-zinc-950">
+            What this means
+          </summary>
+          <div className="mt-2 space-y-1.5 leading-relaxed">
+            <p className="font-semibold text-zinc-800">{explanation.fullName}</p>
+            <p>{explanation.explanation}</p>
+            <p>{explanation.interpretation}</p>
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -734,16 +1093,64 @@ export function CoinPokerAnalyzer() {
                 <p className="text-sm text-zinc-600">{result.fileName}</p>
               </div>
               <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                <StatTile label="Parsed hands" value={formatNumber(result.stats.handsPlayed)} />
-                <StatTile label="Total profit" value={formatCurrency(result.stats.totalProfit)} />
-                <StatTile label="BB/100" value={formatNumber(result.stats.bbPer100)} />
-                <StatTile label="VPIP" value={formatPercent(result.stats.vpip)} />
-                <StatTile label="PFR" value={formatPercent(result.stats.pfr)} />
-                <StatTile label="3Bet" value={formatPercent(result.stats.threeBet)} />
-                <StatTile label="Limp" value={formatPercent(result.stats.limp)} />
-                <StatTile label="CBet Flop" value={formatPercent(result.stats.cBetFlop)} />
-                <StatTile label="WTSD" value={formatPercent(result.stats.wtsd)} />
-                <StatTile label="W$SD" value={formatPercent(result.stats.wsd)} />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS["Parsed hands"]}
+                  label="Parsed hands"
+                  value={formatNumber(result.stats.handsPlayed)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS["Total profit"]}
+                  label="Total profit"
+                  value={formatCurrency(result.stats.totalProfit)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS["BB/100"]}
+                  label="BB/100"
+                  status={getBbPer100Status(result.stats.bbPer100)}
+                  value={formatNumber(result.stats.bbPer100)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS.VPIP}
+                  label="VPIP"
+                  status={getVpipStatus(result.stats.vpip)}
+                  value={formatPercent(result.stats.vpip)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS.PFR}
+                  label="PFR"
+                  status={getPfrStatus(result.stats.pfr)}
+                  value={formatPercent(result.stats.pfr)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS["3Bet"]}
+                  label="3Bet"
+                  status={getThreeBetStatus(result.stats.threeBet)}
+                  value={formatPercent(result.stats.threeBet)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS.Limp}
+                  label="Limp"
+                  status={getLimpStatus(result.stats.limp)}
+                  value={formatPercent(result.stats.limp)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS["CBet Flop"]}
+                  label="CBet Flop"
+                  status={getCBetFlopStatus(result.stats.cBetFlop)}
+                  value={formatPercent(result.stats.cBetFlop)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS.WTSD}
+                  label="WTSD"
+                  status={getWtsdStatus(result.stats.wtsd)}
+                  value={formatPercent(result.stats.wtsd)}
+                />
+                <StatTile
+                  explanation={SUMMARY_EXPLANATIONS["W$SD"]}
+                  label="W$SD"
+                  status={getWsdStatus(result.stats.wsd)}
+                  value={formatPercent(result.stats.wsd)}
+                />
               </dl>
             </section>
 

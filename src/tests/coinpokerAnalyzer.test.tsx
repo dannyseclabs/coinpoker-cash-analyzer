@@ -42,6 +42,24 @@ describe("CoinPokerAnalyzer dashboard", () => {
       screen.queryByRole("heading", { name: "First 10 parsed hands" }),
     ).not.toBeInTheDocument();
 
+    const summary = within(getSectionForHeading("Summary"));
+
+    expect(summary.getAllByText("What this means")).toHaveLength(10);
+    expect(summary.getByText("Voluntarily Put Money In Pot")).toBeInTheDocument();
+    expect(summary.getByText("Preflop Raise")).toBeInTheDocument();
+    expect(summary.getByText("Three-Bet")).toBeInTheDocument();
+    expect(summary.getByText("Went To Showdown")).toBeInTheDocument();
+
+    const statusBadges = getSectionForHeading("Summary").querySelectorAll("span[title]");
+
+    expect(statusBadges).toHaveLength(8);
+    expect(
+      summary.getByTitle(
+        "WTSD above 50% often indicates calling too many marginal hands to showdown.",
+      ),
+    ).toBeInTheDocument();
+    expect(summary.getByText("Very Loose")).toBeInTheDocument();
+
     const leaksHeading = screen.getByRole("heading", { name: "Leaks" });
     const explorerHeading = screen.getByRole("heading", { name: "Hand Explorer" });
 
