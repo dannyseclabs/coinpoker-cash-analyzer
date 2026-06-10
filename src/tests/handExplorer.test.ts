@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   didHeroReachShowdown,
   filterHands,
+  getHandExplorerSummary,
   getVisibleHands,
   normalizeHeroCardsSearch,
   paginateHands,
@@ -432,6 +433,32 @@ describe("handExplorer", () => {
     );
 
     expect(visibleHands.map((hand) => hand.handId)).toEqual(["2", "1"]);
+  });
+
+  it("summarizes filtered profit as currency, total BB, and BB/100", () => {
+    const summary = getHandExplorerSummary([
+      createHand({
+        handId: "nl2-win",
+        date: "2026/06/09 10:00:00 CEST",
+        heroPosition: "BTN",
+        heroCards: ["Ah", "Kh"],
+        heroNetResult: 0.16,
+      }),
+      createHand({
+        handId: "nl2-loss",
+        date: "2026/06/09 11:00:00 CEST",
+        heroPosition: "BB",
+        heroCards: ["Qs", "Qh"],
+        heroNetResult: -0.04,
+      }),
+    ]);
+
+    expect(summary).toMatchObject({
+      handsCount: 2,
+      totalProfit: 0.12,
+      totalBigBlindsWon: 6,
+      bbPer100: 300,
+    });
   });
 
   it("paginates hands", () => {

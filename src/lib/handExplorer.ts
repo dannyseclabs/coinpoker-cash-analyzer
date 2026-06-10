@@ -35,6 +35,7 @@ export interface HandExplorerPagination {
 export interface HandExplorerSummary {
   readonly handsCount: number;
   readonly totalProfit: number;
+  readonly totalBigBlindsWon: number;
   readonly bbPer100: number;
 }
 
@@ -284,6 +285,7 @@ export function getHandExplorerSummary(hands: readonly PokerHand[]): HandExplore
   return {
     handsCount: hands.length,
     totalProfit: roundStat(totalProfit),
+    totalBigBlindsWon: roundStat(totalBigBlinds),
     bbPer100: hands.length === 0 ? 0 : roundStat((totalBigBlinds / hands.length) * 100),
   };
 }

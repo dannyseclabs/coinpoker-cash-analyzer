@@ -9,6 +9,7 @@ export interface StartingHandInsight {
   readonly label: string;
   readonly handsPlayed: number;
   readonly totalProfit: number;
+  readonly totalBigBlindsWon: number;
   readonly bbPer100: number;
   readonly sampleLabel: string;
 }
@@ -26,6 +27,7 @@ export interface PositionInsight {
   readonly position: PositionStats["position"];
   readonly handsPlayed: number;
   readonly totalProfit: number;
+  readonly totalBigBlindsWon: number;
   readonly bbPer100: number;
 }
 
@@ -38,6 +40,7 @@ function toStartingHandInsight(cell: HoleCardMatrixCell): StartingHandInsight {
     label: cell.notation,
     handsPlayed: cell.handsPlayed,
     totalProfit: cell.totalProfit,
+    totalBigBlindsWon: cell.totalBigBlindsWon,
     bbPer100: cell.bbPer100,
     sampleLabel: getHoleCardSampleLabel(cell.handsPlayed),
   };
@@ -59,6 +62,7 @@ function toPositionInsight(stats: PositionStats): PositionInsight {
     position: stats.position,
     handsPlayed: stats.handsPlayed,
     totalProfit: stats.totalProfit,
+    totalBigBlindsWon: stats.totalBigBlindsWon,
     bbPer100: stats.bbPer100,
   };
 }

@@ -266,6 +266,7 @@ function createEmptyPositionStats(position: PokerPosition): PositionStats {
     position,
     handsPlayed: 0,
     totalProfit: 0,
+    totalBigBlindsWon: 0,
     bbPer100: 0,
     vpip: 0,
     pfr: 0,
@@ -283,6 +284,7 @@ function finalizePositionStats(accumulator: PositionAccumulator): PositionStats 
     position: accumulator.position,
     handsPlayed: accumulator.handsPlayed,
     totalProfit: roundStat(accumulator.totalProfit),
+    totalBigBlindsWon: roundStat(accumulator.bigBlindsWon),
     bbPer100: roundStat((accumulator.bigBlindsWon / accumulator.handsPlayed) * 100),
     vpip: asPercent(accumulator.vpipCount, accumulator.handsPlayed),
     pfr: asPercent(accumulator.pfrCount, accumulator.handsPlayed),
@@ -397,6 +399,7 @@ export function calculateStats(hands: readonly PokerHand[]): StatisticsResult {
   return {
     handsPlayed: hands.length,
     totalProfit: roundStat(totalProfit),
+    totalBigBlindsWon: roundStat(totalBigBlindsWon),
     bbPer100: hands.length === 0 ? 0 : roundStat((totalBigBlindsWon / hands.length) * 100),
     vpip: asPercent(vpipCount, hands.length),
     pfr: asPercent(pfrCount, hands.length),

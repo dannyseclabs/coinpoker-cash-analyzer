@@ -74,6 +74,7 @@ describe("calculateStats", () => {
 
     expect(stats.handsPlayed).toBe(10);
     expect(stats.totalProfit).toBeCloseTo(-0.05);
+    expect(stats.totalBigBlindsWon).toBeCloseTo(-0.4);
     expect(stats.bbPer100).toBeCloseTo(-4);
   });
 
@@ -152,6 +153,7 @@ describe("calculateStats", () => {
     expect(stats.positionStats.CO.handsPlayed).toBe(1);
     expect(stats.positionStats.BTN.handsPlayed).toBeGreaterThan(0);
     expect(stats.positionStats.BTN.totalProfit).toBeCloseTo(-0.46);
+    expect(stats.positionStats.BTN.totalBigBlindsWon).toBeCloseTo(-23);
     expect(stats.positionStats.BTN.bbPer100).toBeCloseTo(-1150);
     expect(stats.positionStats.BTN.vpip).toBeGreaterThan(0);
     expect(stats.positionStats.BTN.pfr).toBe(100);
@@ -164,6 +166,7 @@ describe("calculateStats", () => {
 
     expect(stats.positionStats.BB.handsPlayed).toBe(2);
     expect(stats.positionStats.BB.totalProfit).toBeCloseTo(-0.12);
+    expect(stats.positionStats.BB.totalBigBlindsWon).toBeCloseTo(-4.5);
     expect(stats.positionStats.BB.bbPer100).toBeCloseTo(-225);
   });
 

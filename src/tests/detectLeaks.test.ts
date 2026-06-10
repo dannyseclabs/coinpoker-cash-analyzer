@@ -10,6 +10,7 @@ function createPositionStats(overrides: Partial<PositionStats> = {}): PositionSt
     position: "UNKNOWN",
     handsPlayed: 0,
     totalProfit: 0,
+    totalBigBlindsWon: 0,
     bbPer100: 0,
     vpip: 0,
     pfr: 0,
@@ -37,6 +38,7 @@ function createStats(overrides: Partial<StatisticsResult> = {}): StatisticsResul
   return {
     handsPlayed: 150,
     totalProfit: 0,
+    totalBigBlindsWon: 0,
     bbPer100: 0,
     vpip: 24,
     pfr: 18,

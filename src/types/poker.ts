@@ -120,6 +120,7 @@ export interface PositionStats {
   readonly position: PokerPosition;
   readonly handsPlayed: number;
   readonly totalProfit: number;
+  readonly totalBigBlindsWon: number;
   readonly bbPer100: number;
   readonly vpip: number;
   readonly pfr: number;
@@ -140,6 +141,7 @@ export interface StatisticsSampleSizes {
 export interface StatisticsResult {
   readonly handsPlayed: number;
   readonly totalProfit: number;
+  readonly totalBigBlindsWon: number;
   readonly bbPer100: number;
   readonly vpip: number;
   readonly pfr: number;

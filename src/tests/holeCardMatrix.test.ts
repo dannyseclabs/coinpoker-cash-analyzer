@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createHoleCardMatrix,
+  getHoleCardSampleLabel,
   getMatrixNotation,
   normalizeHoleCards,
 } from "../lib/stats/holeCardMatrix";
@@ -119,6 +120,14 @@ describe("holeCardMatrix", () => {
     expect(matrix.rows).toHaveLength(13);
     expect(matrix.rows.every((row) => row.length === 13)).toBe(true);
     expect(Object.keys(matrix.cells)).toHaveLength(169);
+  });
+
+  it("labels tiny starting-hand samples as low confidence", () => {
+    expect(getHoleCardSampleLabel(0)).toBe("Very small sample");
+    expect(getHoleCardSampleLabel(4)).toBe("Very small sample");
+    expect(getHoleCardSampleLabel(5)).toBe("Small Sample");
+    expect(getHoleCardSampleLabel(29)).toBe("Medium Sample");
+    expect(getHoleCardSampleLabel(30)).toBe("Reliable Sample");
   });
 
   it("aggregates matrix stats by normalized hand", () => {

@@ -20,6 +20,12 @@ import {
   type HandExplorerSortDirection,
   type HandExplorerSortKey,
 } from "@/src/lib/handExplorer";
+import {
+  formatBBAmount,
+  formatBigBlindCount,
+  formatCurrency,
+  formatPokerResult,
+} from "@/src/lib/formatPoker";
 import { detectLeaks } from "@/src/lib/leaks/detectLeaks";
 import { parseCoinPokerFile } from "@/src/lib/parser/parseCoinPokerFile";
 import { calculateStats } from "@/src/lib/stats/calculateStats";
@@ -84,6 +90,10 @@ const HOLE_CARD_LEGEND = [
   {
     className: "border-zinc-200 bg-zinc-100",
     label: "Grey = No Sample",
+  },
+  {
+    className: "border-zinc-300 bg-zinc-50",
+    label: "Neutral = 1-4 Hands",
   },
   {
     className: "border-red-200 bg-red-100",
@@ -259,16 +269,16 @@ function formatNumber(value: number): string {
   }).format(value);
 }
 
-function formatCurrency(value: number): string {
-  return `₮${formatNumber(value)}`;
-}
-
 function formatSignedNumber(value: number): string {
   return `${value >= 0 ? "+" : ""}${formatNumber(value)}`;
 }
 
-function formatSignedCurrency(value: number): string {
-  return `${value >= 0 ? "+" : ""}${formatCurrency(value)}`;
+function formatSignedBigBlindCount(bigBlinds: number): string {
+  return formatBigBlindCount(bigBlinds, { signed: true });
+}
+
+function formatNullableBB(amount: number | null, bigBlind: number): string {
+  return amount === null ? "-" : formatBBAmount(amount, bigBlind);
 }
 
 function formatHandsCount(value: number): string {
@@ -299,6 +309,10 @@ function formatNullableCurrency(value: number | null): string {
   return value === null ? "-" : formatCurrency(value);
 }
 
+function formatNullablePokerResult(amount: number | null, bigBlind: number) {
+  return amount === null ? null : formatPokerResult(amount, bigBlind, { signed: false });
+}
+
 function formatHeroShowdownStatus(hand: PokerHand): string {
   return didHeroReachShowdown(hand) ? "Yes" : "No";
 }
@@ -322,6 +336,48 @@ function getShowdownResult(hand: PokerHand, playerName: string, wonAmount: numbe
   }
 
   return "Lost";
+}
+
+function getLeakMetricLabel(metric: LeakResult["metric"]): string {
+  const labels: Readonly<Record<LeakResult["metric"], string>> = {
+    vpip: "VPIP",
+    vpip_pfr_gap: "VPIP/PFR gap",
+    three_bet: "3Bet",
+    limp: "Limp",
+    c_bet_flop: "Flop CBet",
+    wtsd: "WTSD",
+    wsd: "W$SD",
+    bb_bb_per100: "Big blind winrate",
+    btn_pfr: "Button PFR",
+    btn_vpip: "Button VPIP",
+    sb_bb_per100: "Small blind winrate",
+  };
+
+  return labels[metric];
+}
+
+function isLeakBbPer100Metric(metric: LeakResult["metric"]): boolean {
+  return metric === "bb_bb_per100" || metric === "sb_bb_per100";
+}
+
+function formatLeakMetricValue(leak: LeakResult): string {
+  if (isLeakBbPer100Metric(leak.metric)) {
+    return `${formatNumber(leak.value)} BB/100`;
+  }
+
+  return formatPercent(leak.value);
+}
+
+function formatLeakThresholdValue(leak: LeakResult): string {
+  if (isLeakBbPer100Metric(leak.metric)) {
+    return `~${formatNumber(leak.threshold)} BB/100`;
+  }
+
+  return `~${formatPercent(leak.threshold)}`;
+}
+
+function getLeakThresholdLabel(leak: LeakResult): string {
+  return leak.value > leak.threshold ? "Recommended max" : "Recommended min";
 }
 
 function createMetricStatus(label: string, tone: MetricStatusTone, tooltip: string): MetricStatus {
@@ -613,7 +669,11 @@ function formatConfidentBbPer100(cell: HoleCardMatrixCell): string {
 }
 
 function getSampleSizeName(cell: HoleCardMatrixCell): string {
-  return getHoleCardSampleLabel(cell.handsPlayed).replace(" Sample", "");
+  return getHoleCardSampleLabel(cell.handsPlayed).replace(" Sample", "").replace(" sample", "");
+}
+
+function getLowConfidenceHoleCardTone(): string {
+  return "border-zinc-300 bg-zinc-50 text-zinc-700 hover:bg-zinc-100";
 }
 
 function getHoleCardMetricValue(cell: HoleCardMatrixCell, metric: HoleCardMatrixMetric): number {
@@ -637,6 +697,10 @@ function getHoleCardTone(cell: HoleCardMatrixCell, metric: HoleCardMatrixMetric)
     return "border-zinc-200 bg-zinc-100 text-zinc-400 hover:bg-zinc-200";
   }
 
+  if (cell.handsPlayed < 5) {
+    return getLowConfidenceHoleCardTone();
+  }
+
   const value = getHoleCardMetricValue(cell, metric);
 
   if (metric === "handsPlayed") {
@@ -644,11 +708,11 @@ function getHoleCardTone(cell: HoleCardMatrixCell, metric: HoleCardMatrixMetric)
       return "border-emerald-700 bg-emerald-800 text-white hover:bg-emerald-700";
     }
 
-    if (value >= 10) {
+    if (value >= 5) {
       return "border-emerald-200 bg-emerald-100 text-emerald-950 hover:bg-emerald-200";
     }
 
-    return "border-red-200 bg-red-100 text-red-950 hover:bg-red-200";
+    return getLowConfidenceHoleCardTone();
   }
 
   if (metric === "vpipFrequency") {
@@ -663,30 +727,41 @@ function getHoleCardTone(cell: HoleCardMatrixCell, metric: HoleCardMatrixMetric)
     return "border-zinc-200 bg-zinc-100 text-zinc-500 hover:bg-zinc-200";
   }
 
-  if (value >= 50) {
-    return "border-emerald-700 bg-emerald-800 text-white hover:bg-emerald-700";
+  if (cell.handsPlayed >= 30) {
+    if (value > 0) {
+      return "border-emerald-700 bg-emerald-800 text-white hover:bg-emerald-700";
+    }
+
+    if (value < 0) {
+      return "border-red-700 bg-red-800 text-white hover:bg-red-700";
+    }
+
+    return "border-zinc-200 bg-zinc-100 text-zinc-500 hover:bg-zinc-200";
   }
 
   if (value > 0) {
     return "border-emerald-200 bg-emerald-100 text-emerald-950 hover:bg-emerald-200";
   }
 
-  if (value <= -50) {
-    return "border-red-700 bg-red-800 text-white hover:bg-red-700";
-  }
-
-  return "border-red-200 bg-red-100 text-red-950 hover:bg-red-200";
+  return value < 0
+    ? "border-red-200 bg-red-100 text-red-950 hover:bg-red-200"
+    : "border-zinc-200 bg-zinc-100 text-zinc-500 hover:bg-zinc-200";
 }
 
 function getHoleCardTooltip(cell: HoleCardMatrixCell): string {
+  const bbPer100Label =
+    cell.handsPlayed >= 30
+      ? formatSignedNumber(cell.bbPer100)
+      : `${formatSignedNumber(cell.bbPer100)} (low confidence)`;
+
   return [
     `Hand: ${cell.notation}`,
     "",
     `Hands Played: ${cell.handsPlayed}`,
     "",
-    `Profit: ${formatSignedNumber(cell.totalBigBlindsWon)} BB`,
+    `Profit: ${formatSignedBigBlindCount(cell.totalBigBlindsWon)}`,
     "",
-    `BB/100: ${formatSignedNumber(cell.bbPer100)}`,
+    `BB/100: ${bbPer100Label}`,
     "",
     `Sample Size:`,
     getSampleSizeName(cell),
@@ -733,11 +808,13 @@ function SectionHeader({
 function StatTile({
   label,
   value,
+  secondaryValue,
   explanation,
   status,
 }: Readonly<{
   label: string;
-  value: string;
+  value: ReactNode;
+  secondaryValue?: string | undefined;
   explanation?: SummaryExplanation;
   status?: MetricStatus;
 }>) {
@@ -759,6 +836,11 @@ function StatTile({
       <dd className="mt-3 text-3xl font-semibold tracking-tight text-zinc-950 tabular-nums">
         {value}
       </dd>
+      {secondaryValue === undefined ? null : (
+        <p className="mt-1 font-mono text-sm font-medium tabular-nums text-zinc-500">
+          {secondaryValue}
+        </p>
+      )}
       {explanation === undefined ? null : (
         <details className="group mt-4 rounded-lg border border-zinc-100 bg-zinc-50/80 text-xs text-zinc-600 open:border-zinc-200 open:bg-white">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-medium text-zinc-700 transition hover:text-zinc-950 group-open:border-b group-open:border-zinc-100 [&::-webkit-details-marker]:hidden">
@@ -781,12 +863,14 @@ function SummaryInsightCard({
   mainValue,
   secondaryContext,
   metaContext,
+  highlight,
   action,
 }: Readonly<{
   label: string;
   mainValue: string;
   secondaryContext?: string | undefined;
   metaContext?: string | undefined;
+  highlight?: ReactNode | undefined;
   action?: ReactNode | undefined;
 }>) {
   return (
@@ -796,6 +880,7 @@ function SummaryInsightCard({
         <p className="mt-3 break-words text-2xl font-semibold tracking-tight text-zinc-950">
           {mainValue}
         </p>
+        {highlight === undefined ? null : <div className="mt-3">{highlight}</div>}
         {secondaryContext === undefined ? null : (
           <p className="mt-2 text-sm font-medium text-zinc-700">{secondaryContext}</p>
         )}
@@ -831,10 +916,14 @@ function PositionHighlight({
 }
 
 function formatStartingHandSecondaryContext(insight: StartingHandInsight): string {
-  return `${formatSignedCurrency(insight.totalProfit)} · ${formatHandsCount(insight.handsPlayed)}`;
+  return `${formatCurrency(insight.totalProfit)} · ${formatHandsCount(insight.handsPlayed)}`;
 }
 
 function formatStartingHandMetaContext(insight: StartingHandInsight): string {
+  if (insight.handsPlayed < 30) {
+    return `${insight.sampleLabel} · BB/100 ${formatSignedNumber(insight.bbPer100)} (low confidence)`;
+  }
+
   return `BB/100 ${formatSignedNumber(insight.bbPer100)} · ${insight.sampleLabel}`;
 }
 
@@ -845,15 +934,57 @@ function formatPositionSecondaryContext(insight: PositionInsight): string {
 }
 
 function formatPositionMetaContext(insight: PositionInsight): string {
-  return `Profit ${formatSignedCurrency(insight.totalProfit)}`;
-}
-
-function formatHandSecondaryContext(insight: HandInsight): string {
-  return `${formatSignedCurrency(insight.heroNet)} · ${insight.position}`;
+  return `Profit ${formatSignedBigBlindCount(insight.totalBigBlindsWon)} · ${formatCurrency(
+    insight.totalProfit,
+  )}`;
 }
 
 function formatHandMetaContext(insight: HandInsight): string {
-  return `Hand ${insight.handId} · Pot ${formatNullableCurrency(insight.potSize)}`;
+  return `Pot ${formatNullableBB(
+    insight.potSize,
+    insight.hand.stakes.bigBlind,
+  )} · ${formatNullableCurrency(insight.potSize)}`;
+}
+
+function SummaryStartingHandInsightHighlight({
+  insight,
+}: Readonly<{ insight: StartingHandInsight }>) {
+  return (
+    <p className="font-mono text-lg font-semibold tabular-nums text-zinc-950">
+      {formatSignedBigBlindCount(insight.totalBigBlindsWon)}
+    </p>
+  );
+}
+
+function SummaryMostPlayedStartingHandInsightHighlight({
+  insight,
+}: Readonly<{ insight: StartingHandInsight }>) {
+  return (
+    <div className="space-y-1">
+      <p className="text-sm font-medium text-zinc-700">{formatHandsCount(insight.handsPlayed)}</p>
+      <p className="font-mono text-lg font-semibold tabular-nums text-zinc-950">
+        {formatSignedBigBlindCount(insight.totalBigBlindsWon)}
+      </p>
+      <p className="text-sm font-medium text-zinc-700">{formatCurrency(insight.totalProfit)}</p>
+    </div>
+  );
+}
+
+function SummaryHandInsightHighlight({ insight }: Readonly<{ insight: HandInsight }>) {
+  const heroNet = formatPokerResult(insight.heroNet, insight.hand.stakes.bigBlind);
+
+  return (
+    <div className="space-y-1">
+      <p className="font-mono text-lg font-semibold tabular-nums text-zinc-950">
+        {heroNet.bbLabel}
+      </p>
+      <p className="text-sm font-medium text-zinc-700">
+        {heroNet.currencyLabel} · {insight.position}
+      </p>
+      <p className="text-xs leading-5 text-zinc-500">{formatHandMetaContext(insight)}</p>
+      <p className="font-mono text-xs leading-5 text-zinc-500">Hand {insight.handId}</p>
+    </div>
+  );
 }
 
 function HandDetailPanel({
@@ -864,6 +995,8 @@ function HandDetailPanel({
   onClose: () => void;
 }>) {
   const boardCards = formatBoard(hand);
+  const heroNet = formatPokerResult(hand.heroNetResult, hand.stakes.bigBlind);
+  const totalPot = formatNullablePokerResult(hand.totalPot, hand.stakes.bigBlind);
 
   return (
     <div
@@ -907,10 +1040,22 @@ function HandDetailPanel({
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero net</dt>
-              <dd className="mt-1 font-mono font-semibold tabular-nums">
-                {formatSignedCurrency(hand.heroNetResult)}
+              <dd className="mt-1 flex flex-col font-mono tabular-nums">
+                <span className="text-base font-semibold text-zinc-950">{heroNet.bbLabel}</span>
+                <span className="text-xs font-medium text-zinc-500">{heroNet.currencyLabel}</span>
               </dd>
             </div>
+            {totalPot === null ? null : (
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-zinc-500">Pot</dt>
+                <dd className="mt-1 flex flex-col font-mono tabular-nums">
+                  <span className="text-base font-semibold text-zinc-950">{totalPot.bbLabel}</span>
+                  <span className="text-xs font-medium text-zinc-500">
+                    {totalPot.currencyLabel}
+                  </span>
+                </dd>
+              </div>
+            )}
           </dl>
         </header>
 
@@ -928,18 +1073,25 @@ function HandDetailPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {hand.players.map((player) => (
-                    <tr key={player.seat} className="odd:bg-white even:bg-zinc-50/80">
-                      <td className={TABLE_CELL_CLASS}>{player.seat}</td>
-                      <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
-                        {player.name}
-                      </td>
-                      <td className={TABLE_NUMERIC_CELL_CLASS}>
-                        {formatCurrency(player.startingStack)}
-                      </td>
-                      <td className={TABLE_CELL_CLASS}>{player.isHero ? "Hero" : "-"}</td>
-                    </tr>
-                  ))}
+                  {hand.players.map((player) => {
+                    const stack = formatPokerResult(player.startingStack, hand.stakes.bigBlind, {
+                      signed: false,
+                    });
+
+                    return (
+                      <tr key={player.seat} className="odd:bg-white even:bg-zinc-50/80">
+                        <td className={TABLE_CELL_CLASS}>{player.seat}</td>
+                        <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
+                          {player.name}
+                        </td>
+                        <td className={TABLE_NUMERIC_CELL_CLASS}>
+                          <span className="block font-semibold text-zinc-950">{stack.bbLabel}</span>
+                          <span className="block text-xs text-zinc-500">{stack.currencyLabel}</span>
+                        </td>
+                        <td className={TABLE_CELL_CLASS}>{player.isHero ? "Hero" : "-"}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1027,27 +1179,50 @@ function HandDetailPanel({
                     </tr>
                   </thead>
                   <tbody>
-                    {hand.showdown.entries.map((entry) => (
-                      <tr key={entry.playerName} className="odd:bg-white even:bg-zinc-50/80">
-                        <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
-                          {entry.playerName}
-                        </td>
-                        <td className={`${TABLE_CELL_CLASS} font-mono`}>
-                          {formatCards(entry.cards)}
-                        </td>
-                        <td className={TABLE_CELL_CLASS}>
-                          {getShowdownResult(hand, entry.playerName, entry.wonAmount)}
-                          {entry.handDescription === null ? "" : ` (${entry.handDescription})`}
-                        </td>
-                        <td className={TABLE_NUMERIC_CELL_CLASS}>
-                          {formatCurrency(entry.wonAmount)}
-                        </td>
-                      </tr>
-                    ))}
+                    {hand.showdown.entries.map((entry) => {
+                      const collected = formatPokerResult(entry.wonAmount, hand.stakes.bigBlind, {
+                        signed: false,
+                      });
+
+                      return (
+                        <tr key={entry.playerName} className="odd:bg-white even:bg-zinc-50/80">
+                          <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
+                            {entry.playerName}
+                          </td>
+                          <td className={`${TABLE_CELL_CLASS} font-mono`}>
+                            {formatCards(entry.cards)}
+                          </td>
+                          <td className={TABLE_CELL_CLASS}>
+                            {getShowdownResult(hand, entry.playerName, entry.wonAmount)}
+                            {entry.handDescription === null ? "" : ` (${entry.handDescription})`}
+                          </td>
+                          <td className={TABLE_NUMERIC_CELL_CLASS}>
+                            <span className="block font-semibold text-zinc-950">
+                              {collected.bbLabel}
+                            </span>
+                            <span className="block text-xs text-zinc-500">
+                              {collected.currencyLabel}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
+          </section>
+
+          <section className={SECTION_GAP_CLASS}>
+            <details className="group overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/50">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-zinc-100/80 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-100 [&::-webkit-details-marker]:hidden">
+                <span>Raw Hand History</span>
+                <span className="text-zinc-400 transition group-open:rotate-90">›</span>
+              </summary>
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap border-t border-zinc-200 bg-zinc-950 px-4 py-4 font-mono text-xs leading-5 text-zinc-100">
+                {hand.rawText || "Raw hand history unavailable."}
+              </pre>
+            </details>
           </section>
         </div>
       </div>
@@ -1284,7 +1459,8 @@ export function CoinPokerAnalyzer() {
                 <StatTile
                   explanation={SUMMARY_EXPLANATIONS["Total profit"]}
                   label="Total profit"
-                  value={formatCurrency(result.stats.totalProfit)}
+                  secondaryValue={formatCurrency(result.stats.totalProfit)}
+                  value={formatSignedBigBlindCount(result.stats.totalBigBlindsWon)}
                 />
                 <StatTile
                   explanation={SUMMARY_EXPLANATIONS["BB/100"]}
@@ -1347,6 +1523,13 @@ export function CoinPokerAnalyzer() {
                 />
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                   <SummaryInsightCard
+                    highlight={
+                      summaryStartingHandInsights.mostProfitable === null ? undefined : (
+                        <SummaryStartingHandInsightHighlight
+                          insight={summaryStartingHandInsights.mostProfitable}
+                        />
+                      )
+                    }
                     label="Most Profitable Starting Hand"
                     mainValue={
                       summaryStartingHandInsights.mostProfitable?.label ?? "Not enough sample"
@@ -1365,6 +1548,13 @@ export function CoinPokerAnalyzer() {
                     }
                   />
                   <SummaryInsightCard
+                    highlight={
+                      summaryStartingHandInsights.worst === null ? undefined : (
+                        <SummaryStartingHandInsightHighlight
+                          insight={summaryStartingHandInsights.worst}
+                        />
+                      )
+                    }
                     label="Worst Starting Hand"
                     mainValue={summaryStartingHandInsights.worst?.label ?? "Not enough sample"}
                     metaContext={
@@ -1379,17 +1569,19 @@ export function CoinPokerAnalyzer() {
                     }
                   />
                   <SummaryInsightCard
+                    highlight={
+                      summaryStartingHandInsights.mostPlayed === null ? undefined : (
+                        <SummaryMostPlayedStartingHandInsightHighlight
+                          insight={summaryStartingHandInsights.mostPlayed}
+                        />
+                      )
+                    }
                     label="Most Played Starting Hand"
                     mainValue={summaryStartingHandInsights.mostPlayed?.label ?? "Not enough sample"}
                     metaContext={
                       summaryStartingHandInsights.mostPlayed === null
                         ? "Upload hands with Hero hole cards"
                         : formatStartingHandMetaContext(summaryStartingHandInsights.mostPlayed)
-                    }
-                    secondaryContext={
-                      summaryStartingHandInsights.mostPlayed === null
-                        ? undefined
-                        : formatStartingHandSecondaryContext(summaryStartingHandInsights.mostPlayed)
                     }
                   />
                   <SummaryInsightCard
@@ -1406,21 +1598,16 @@ export function CoinPokerAnalyzer() {
                         </button>
                       )
                     }
+                    highlight={
+                      summaryHandInsights.biggestWinning === null ? undefined : (
+                        <SummaryHandInsightHighlight insight={summaryHandInsights.biggestWinning} />
+                      )
+                    }
                     label="Biggest Winning Hand"
                     mainValue={
                       summaryHandInsights.biggestWinning === null
                         ? "Not enough sample"
                         : formatCards(summaryHandInsights.biggestWinning.heroCards)
-                    }
-                    metaContext={
-                      summaryHandInsights.biggestWinning === null
-                        ? undefined
-                        : formatHandMetaContext(summaryHandInsights.biggestWinning)
-                    }
-                    secondaryContext={
-                      summaryHandInsights.biggestWinning === null
-                        ? undefined
-                        : formatHandSecondaryContext(summaryHandInsights.biggestWinning)
                     }
                   />
                   <SummaryInsightCard
@@ -1437,21 +1624,16 @@ export function CoinPokerAnalyzer() {
                         </button>
                       )
                     }
+                    highlight={
+                      summaryHandInsights.biggestLosing === null ? undefined : (
+                        <SummaryHandInsightHighlight insight={summaryHandInsights.biggestLosing} />
+                      )
+                    }
                     label="Biggest Losing Hand"
                     mainValue={
                       summaryHandInsights.biggestLosing === null
                         ? "Not enough sample"
                         : formatCards(summaryHandInsights.biggestLosing.heroCards)
-                    }
-                    metaContext={
-                      summaryHandInsights.biggestLosing === null
-                        ? undefined
-                        : formatHandMetaContext(summaryHandInsights.biggestLosing)
-                    }
-                    secondaryContext={
-                      summaryHandInsights.biggestLosing === null
-                        ? undefined
-                        : formatHandSecondaryContext(summaryHandInsights.biggestLosing)
                     }
                   />
                   <SummaryInsightCard
@@ -1499,7 +1681,11 @@ export function CoinPokerAnalyzer() {
                     value={
                       positionHighlights.best === null
                         ? undefined
-                        : `${formatSignedNumber(positionHighlights.best.bbPer100)} BB/100`
+                        : `Profit ${formatSignedBigBlindCount(
+                            positionHighlights.best.totalBigBlindsWon,
+                          )} · ${formatCurrency(
+                            positionHighlights.best.totalProfit,
+                          )} · ${formatSignedNumber(positionHighlights.best.bbPer100)} BB/100`
                     }
                   />
                   <PositionHighlight
@@ -1508,7 +1694,11 @@ export function CoinPokerAnalyzer() {
                     value={
                       positionHighlights.worst === null
                         ? undefined
-                        : `${formatSignedNumber(positionHighlights.worst.bbPer100)} BB/100`
+                        : `Profit ${formatSignedBigBlindCount(
+                            positionHighlights.worst.totalBigBlindsWon,
+                          )} · ${formatCurrency(
+                            positionHighlights.worst.totalProfit,
+                          )} · ${formatSignedNumber(positionHighlights.worst.bbPer100)} BB/100`
                     }
                   />
                   <PositionHighlight
@@ -1554,7 +1744,12 @@ export function CoinPokerAnalyzer() {
                           <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(stats.vpip)}</td>
                           <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(stats.pfr)}</td>
                           <td className={TABLE_NUMERIC_CELL_CLASS}>
-                            {formatCurrency(stats.totalProfit)}
+                            <span className="block font-semibold text-zinc-950">
+                              {formatSignedBigBlindCount(stats.totalBigBlindsWon)}
+                            </span>
+                            <span className="block text-xs text-zinc-500">
+                              {formatCurrency(stats.totalProfit)}
+                            </span>
                           </td>
                           <td className={TABLE_NUMERIC_CELL_CLASS}>
                             {formatNumber(stats.bbPer100)}
@@ -1659,8 +1854,13 @@ export function CoinPokerAnalyzer() {
                         </div>
                         <div>
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">Profit</dt>
-                          <dd className="mt-1 font-mono font-semibold tabular-nums">
-                            {formatSignedCurrency(selectedHoleCardCell.totalProfit)}
+                          <dd className="mt-1 flex flex-col font-mono tabular-nums">
+                            <span className="font-semibold text-zinc-950">
+                              {formatSignedBigBlindCount(selectedHoleCardCell.totalBigBlindsWon)}
+                            </span>
+                            <span className="text-xs font-medium text-zinc-500">
+                              {formatCurrency(selectedHoleCardCell.totalProfit)}
+                            </span>
                           </dd>
                         </div>
                         <div>
@@ -1715,7 +1915,12 @@ export function CoinPokerAnalyzer() {
                                   <td className={TABLE_CELL_CLASS}>{occurrence.date}</td>
                                   <td className={TABLE_CELL_CLASS}>{occurrence.position}</td>
                                   <td className={TABLE_NUMERIC_CELL_CLASS}>
-                                    {formatSignedCurrency(occurrence.profit)}
+                                    <span className="block font-semibold text-zinc-950">
+                                      {formatSignedBigBlindCount(occurrence.bigBlindsWon)}
+                                    </span>
+                                    <span className="block text-xs text-zinc-500">
+                                      {formatCurrency(occurrence.profit)}
+                                    </span>
                                   </td>
                                   <td className={TABLE_CELL_CLASS}>
                                     {hand === null ? "-" : formatHeroShowdownStatus(hand)}
@@ -1766,10 +1971,14 @@ export function CoinPokerAnalyzer() {
                               {leak.category}
                             </span>
                           </div>
-                          <p className="mt-3 font-mono text-sm text-zinc-700">
-                            {leak.metric}: {formatNumber(leak.value)} / threshold{" "}
-                            {formatNumber(leak.threshold)}
-                          </p>
+                          <div className="mt-3 font-mono text-sm leading-6 text-zinc-700">
+                            <p>
+                              {getLeakMetricLabel(leak.metric)}: {formatLeakMetricValue(leak)}
+                            </p>
+                            <p>
+                              {getLeakThresholdLabel(leak)}: {formatLeakThresholdValue(leak)}
+                            </p>
+                          </div>
                           <p className="mt-2 text-sm leading-6 text-zinc-600">{leak.explanation}</p>
                           <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
                             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -1805,7 +2014,8 @@ export function CoinPokerAnalyzer() {
                 />
                 <StatTile
                   label="Filtered profit"
-                  value={formatSignedCurrency(handExplorerSummary.totalProfit)}
+                  secondaryValue={formatCurrency(handExplorerSummary.totalProfit)}
+                  value={formatSignedBigBlindCount(handExplorerSummary.totalBigBlindsWon)}
                 />
                 <StatTile
                   label="Average filtered BB/100"
@@ -2037,44 +2247,59 @@ export function CoinPokerAnalyzer() {
                         </td>
                       </tr>
                     ) : (
-                      visibleHands.map((hand) => (
-                        <tr
-                          key={hand.id}
-                          className="odd:bg-white even:bg-zinc-50/80 hover:bg-emerald-50/50"
-                        >
-                          <td className={`${TABLE_CELL_CLASS} font-mono font-medium`}>
-                            {hand.handId}
-                          </td>
-                          <td className={TABLE_CELL_CLASS}>{hand.date}</td>
-                          <td className={TABLE_CELL_CLASS}>{hand.tableName ?? "-"}</td>
-                          <td className={`${TABLE_CELL_CLASS} font-mono tabular-nums`}>
-                            {formatStakes(hand)}
-                          </td>
-                          <td className={TABLE_CELL_CLASS}>{hand.heroPosition}</td>
-                          <td className={`${TABLE_CELL_CLASS} font-mono`}>
-                            {formatCards(hand.heroCards)}
-                          </td>
-                          <td className={`${TABLE_CELL_CLASS} font-mono`}>
-                            {formatBoard(hand) || "-"}
-                          </td>
-                          <td className={TABLE_NUMERIC_CELL_CLASS}>
-                            {formatNullableCurrency(hand.totalPot)}
-                          </td>
-                          <td className={TABLE_NUMERIC_CELL_CLASS}>
-                            {formatSignedCurrency(hand.heroNetResult)}
-                          </td>
-                          <td className={TABLE_CELL_CLASS}>{formatHeroShowdownStatus(hand)}</td>
-                          <td className={TABLE_CELL_CLASS}>
-                            <button
-                              className={SMALL_BUTTON_CLASS}
-                              type="button"
-                              onClick={() => setSelectedHand(hand)}
-                            >
-                              View
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                      visibleHands.map((hand) => {
+                        const pot = formatNullablePokerResult(hand.totalPot, hand.stakes.bigBlind);
+                        const heroNet = formatPokerResult(hand.heroNetResult, hand.stakes.bigBlind);
+
+                        return (
+                          <tr
+                            key={hand.id}
+                            className="odd:bg-white even:bg-zinc-50/80 hover:bg-emerald-50/50"
+                          >
+                            <td className={`${TABLE_CELL_CLASS} font-mono font-medium`}>
+                              {hand.handId}
+                            </td>
+                            <td className={TABLE_CELL_CLASS}>{hand.date}</td>
+                            <td className={TABLE_CELL_CLASS}>{hand.tableName ?? "-"}</td>
+                            <td className={`${TABLE_CELL_CLASS} font-mono tabular-nums`}>
+                              {formatStakes(hand)}
+                            </td>
+                            <td className={TABLE_CELL_CLASS}>{hand.heroPosition}</td>
+                            <td className={`${TABLE_CELL_CLASS} font-mono`}>
+                              {formatCards(hand.heroCards)}
+                            </td>
+                            <td className={`${TABLE_CELL_CLASS} font-mono`}>
+                              {formatBoard(hand) || "-"}
+                            </td>
+                            <td className={TABLE_NUMERIC_CELL_CLASS}>
+                              <span className="block font-semibold text-zinc-950">
+                                {pot?.bbLabel ?? "-"}
+                              </span>
+                              <span className="block text-xs text-zinc-500">
+                                {pot?.currencyLabel ?? "-"}
+                              </span>
+                            </td>
+                            <td className={TABLE_NUMERIC_CELL_CLASS}>
+                              <span className="block font-semibold text-zinc-950">
+                                {heroNet.bbLabel}
+                              </span>
+                              <span className="block text-xs text-zinc-500">
+                                {heroNet.currencyLabel}
+                              </span>
+                            </td>
+                            <td className={TABLE_CELL_CLASS}>{formatHeroShowdownStatus(hand)}</td>
+                            <td className={TABLE_CELL_CLASS}>
+                              <button
+                                className={SMALL_BUTTON_CLASS}
+                                type="button"
+                                onClick={() => setSelectedHand(hand)}
+                              >
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

@@ -16,6 +16,7 @@ function createPositionStats(
     position,
     handsPlayed: 0,
     totalProfit: 0,
+    totalBigBlindsWon: 0,
     bbPer100: 0,
     vpip: 0,
     pfr: 0,

@@ -88,6 +88,7 @@ function createPositionStats(
     position,
     handsPlayed: 0,
     totalProfit: 0,
+    totalBigBlindsWon: 0,
     bbPer100: 0,
     vpip: 0,
     pfr: 0,
@@ -114,7 +115,7 @@ describe("summaryInsights", () => {
       label: "KQs",
       handsPlayed: 3,
       totalProfit: 1.5,
-      sampleLabel: "Small Sample",
+      sampleLabel: "Very small sample",
     });
   });
 
@@ -152,6 +153,36 @@ describe("summaryInsights", () => {
     expect(getMostPlayedStartingHand(matrix)).toMatchObject({
       label: "AKo",
       handsPlayed: 4,
+    });
+  });
+
+  it("carries mixed-stake total BB aggregation for starting hand display", () => {
+    const matrix = createHoleCardMatrix([
+      createHand({
+        handId: "1",
+        heroCards: ["As", "Ks"],
+        heroNetResult: 0.04,
+        bigBlind: 0.02,
+      }),
+      createHand({
+        handId: "2",
+        heroCards: ["Ah", "Kh"],
+        heroNetResult: 0.1,
+        bigBlind: 0.05,
+      }),
+      createHand({
+        handId: "3",
+        heroCards: ["Ad", "Kd"],
+        heroNetResult: -0.02,
+        bigBlind: 0.02,
+      }),
+    ]);
+
+    expect(getMostProfitableStartingHand(matrix)).toMatchObject({
+      label: "AKs",
+      totalProfit: 0.12,
+      totalBigBlindsWon: 3,
+      bbPer100: 100,
     });
   });
 
