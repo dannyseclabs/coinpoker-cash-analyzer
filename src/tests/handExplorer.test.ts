@@ -10,6 +10,7 @@ import {
   sortHands,
   type HandExplorerFilters,
 } from "../lib/handExplorer";
+import { detectPokerSessions } from "../lib/sessions";
 import type { Card, HandAction, PokerHand, PokerPosition, ShowdownEntry } from "../types";
 
 const DEFAULT_FILTERS: HandExplorerFilters = {
@@ -29,6 +30,7 @@ function createHand({
   heroCards,
   heroNetResult,
   totalPot = null,
+  bigBlind = 0.02,
   showdown = false,
   showdownEntries,
   heroActions = [],
@@ -39,6 +41,7 @@ function createHand({
   heroCards: readonly [Card, Card];
   heroNetResult: number;
   totalPot?: number | null;
+  bigBlind?: number;
   showdown?: boolean;
   showdownEntries?: readonly ShowdownEntry[];
   heroActions?: readonly HandAction[];
@@ -56,8 +59,8 @@ function createHand({
     maxPlayers: 6,
     buttonSeat: 1,
     stakes: {
-      smallBlind: 0.01,
-      bigBlind: 0.02,
+      smallBlind: bigBlind / 2,
+      bigBlind,
       currency: "₮",
     },
     players: [],
@@ -427,10 +430,57 @@ describe("handExplorer", () => {
     ).toEqual(["today", "yesterday", "last-seven", "last-thirty", "old"]);
   });
 
-  it("sorts by hero net", () => {
+  it("sorts by Hero Net BB ascending", () => {
     expect(
-      sortHands(hands, { key: "heroNet", direction: "asc" }).map((hand) => hand.handId),
+      sortHands(hands, { key: "heroNetBb", direction: "asc" }).map((hand) => hand.handId),
     ).toEqual(["2", "3", "1"]);
+  });
+
+  it("sorts by Hero Net BB descending", () => {
+    expect(
+      sortHands(hands, { key: "heroNetBb", direction: "desc" }).map((hand) => hand.handId),
+    ).toEqual(["1", "3", "2"]);
+  });
+
+  it("sorts by Pot BB ascending", () => {
+    const mixedStakes = [
+      createHand({
+        handId: "small-bb-pot",
+        date: "2026/06/09 10:00:00 CEST",
+        heroPosition: "BTN",
+        heroCards: ["Ah", "Kh"],
+        heroNetResult: 0,
+        totalPot: 1,
+        bigBlind: 0.1,
+      }),
+      createHand({
+        handId: "large-bb-pot",
+        date: "2026/06/09 10:01:00 CEST",
+        heroPosition: "BTN",
+        heroCards: ["Ad", "Kd"],
+        heroNetResult: 0,
+        totalPot: 0.4,
+        bigBlind: 0.02,
+      }),
+      createHand({
+        handId: "no-pot",
+        date: "2026/06/09 10:02:00 CEST",
+        heroPosition: "BTN",
+        heroCards: ["As", "Ks"],
+        heroNetResult: 0,
+        totalPot: null,
+      }),
+    ];
+
+    expect(
+      sortHands(mixedStakes, { key: "potBb", direction: "asc" }).map((hand) => hand.handId),
+    ).toEqual(["no-pot", "small-bb-pot", "large-bb-pot"]);
+  });
+
+  it("sorts by Pot BB descending", () => {
+    expect(
+      sortHands(hands, { key: "potBb", direction: "desc" }).map((hand) => hand.handId),
+    ).toEqual(["1", "2", "3"]);
   });
 
   it("sorts by date descending by default direction", () => {
@@ -454,10 +504,83 @@ describe("handExplorer", () => {
         ...DEFAULT_FILTERS,
         heroCardsSearch: "AK",
       },
-      { key: "heroNet", direction: "asc" },
+      { key: "heroNetBb", direction: "asc" },
     );
 
     expect(visibleHands.map((hand) => hand.handId)).toEqual(["2", "1"]);
+  });
+
+  it("sorts selected session hands after filtering", () => {
+    const sessionHands = [
+      createHand({
+        handId: "session-1-win",
+        date: "2026/06/09 10:00:00 CEST",
+        heroPosition: "BTN",
+        heroCards: ["Ah", "Kh"],
+        heroNetResult: 0.2,
+      }),
+      createHand({
+        handId: "session-1-loss",
+        date: "2026/06/09 10:01:00 CEST",
+        heroPosition: "BB",
+        heroCards: ["7c", "2d"],
+        heroNetResult: -0.1,
+      }),
+      createHand({
+        handId: "session-2-win",
+        date: "2026/06/09 11:00:00 CEST",
+        heroPosition: "CO",
+        heroCards: ["As", "Ad"],
+        heroNetResult: 0.5,
+      }),
+    ];
+    const selectedSession = detectPokerSessions(sessionHands).find((session) =>
+      session.hands.some((hand) => hand.handId === "session-1-win"),
+    );
+
+    expect(
+      getVisibleHands(selectedSession?.hands ?? [], DEFAULT_FILTERS, {
+        key: "heroNetBb",
+        direction: "desc",
+      }).map((hand) => hand.handId),
+    ).toEqual(["session-1-win", "session-1-loss"]);
+  });
+
+  it("sorts after applying the lost-result filter", () => {
+    const mixedResults = [
+      createHand({
+        handId: "small-loss",
+        date: "2026/06/09 10:00:00 CEST",
+        heroPosition: "BTN",
+        heroCards: ["Ah", "Kh"],
+        heroNetResult: -0.02,
+      }),
+      createHand({
+        handId: "win",
+        date: "2026/06/09 10:01:00 CEST",
+        heroPosition: "BB",
+        heroCards: ["7c", "2d"],
+        heroNetResult: 1,
+      }),
+      createHand({
+        handId: "big-loss",
+        date: "2026/06/09 10:02:00 CEST",
+        heroPosition: "CO",
+        heroCards: ["As", "Ad"],
+        heroNetResult: -0.4,
+      }),
+    ];
+
+    expect(
+      getVisibleHands(
+        mixedResults,
+        {
+          ...DEFAULT_FILTERS,
+          result: "Lost",
+        },
+        { key: "heroNetBb", direction: "asc" },
+      ).map((hand) => hand.handId),
+    ).toEqual(["big-loss", "small-loss"]);
   });
 
   it("summarizes filtered profit as currency, total BB, and BB/100", () => {
@@ -530,7 +653,7 @@ describe("handExplorer", () => {
         ...DEFAULT_FILTERS,
         position: "BTN",
       },
-      { key: "heroNet", direction: "asc" },
+      { key: "heroNetBb", direction: "asc" },
       {
         page: 2,
         pageSize: 25,
@@ -542,5 +665,55 @@ describe("handExplorer", () => {
     ).toBe(true);
     expect(visibleHands).toHaveLength(5);
     expect(visibleHands[0]?.handId).toBe("60");
+  });
+
+  it("keeps sorting before pagination", () => {
+    const pagedHands = Array.from({ length: 60 }, (_, index) =>
+      createHand({
+        handId: `${index + 1}`,
+        date: `2026/06/09 ${String(index).padStart(2, "0")}:00:00 CEST`,
+        heroPosition: "BTN",
+        heroCards: ["Ah", "Kh"],
+        heroNetResult: index,
+      }),
+    );
+
+    expect(
+      getVisibleHands(
+        pagedHands,
+        DEFAULT_FILTERS,
+        { key: "heroNetBb", direction: "desc" },
+        {
+          page: 2,
+          pageSize: 25,
+        },
+      ).map((hand) => hand.handId),
+    ).toEqual([
+      "35",
+      "34",
+      "33",
+      "32",
+      "31",
+      "30",
+      "29",
+      "28",
+      "27",
+      "26",
+      "25",
+      "24",
+      "23",
+      "22",
+      "21",
+      "20",
+      "19",
+      "18",
+      "17",
+      "16",
+      "15",
+      "14",
+      "13",
+      "12",
+      "11",
+    ]);
   });
 });

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { CoinPokerAnalyzer } from "../components/coinpoker-analyzer";
 import { formatBBAmount, formatCurrency } from "../lib/formatPoker";
 import { parseCoinPokerFile } from "../lib/parser/parseCoinPokerFile";
+import { detectPokerSessions } from "../lib/sessions";
 import { createHoleCardMatrix } from "../lib/stats/holeCardMatrix";
 import {
   getBiggestLosingHand,
@@ -59,6 +60,8 @@ describe("CoinPokerAnalyzer dashboard", () => {
     });
     const parsedHands = parseCoinPokerFile(fixture);
     const holeCardMatrix = createHoleCardMatrix(parsedHands);
+    const detectedSessions = detectPokerSessions(parsedHands);
+    const firstSession = detectedSessions[0];
     const mostProfitableStartingHand = getMostProfitableStartingHand(holeCardMatrix);
     const worstStartingHand = getWorstStartingHand(holeCardMatrix);
     const biggestWinningHand = getBiggestWinningHand(parsedHands);
@@ -100,6 +103,7 @@ describe("CoinPokerAnalyzer dashboard", () => {
 
     const summaryHeading = screen.getByRole("heading", { name: "Summary" });
     const summaryInsightsHeading = screen.getByRole("heading", { name: "Summary Insights" });
+    const sessionsHeading = screen.getByRole("heading", { name: "Sessions" });
     const positionHeading = screen.getByRole("heading", { name: "Position Analysis" });
 
     expect(
@@ -107,8 +111,11 @@ describe("CoinPokerAnalyzer dashboard", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      summaryInsightsHeading.compareDocumentPosition(positionHeading) &
+      summaryInsightsHeading.compareDocumentPosition(sessionsHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      sessionsHeading.compareDocumentPosition(positionHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
     const summaryInsights = within(getSectionForHeading("Summary Insights"));
@@ -116,6 +123,7 @@ describe("CoinPokerAnalyzer dashboard", () => {
     expect(
       summaryInsights.getByText("Quick highlights from the imported hand history."),
     ).toBeInTheDocument();
+    expect(summaryInsights.getByText("Normal insights exclude splash pots.")).toBeInTheDocument();
     expect(summaryInsights.getByText("Most Profitable Starting Hand")).toBeInTheDocument();
     expect(summaryInsights.getByText("Worst Starting Hand")).toBeInTheDocument();
     expect(summaryInsights.getByText("Most Played Starting Hand")).toBeInTheDocument();
@@ -177,6 +185,20 @@ describe("CoinPokerAnalyzer dashboard", () => {
     expect(summaryInsights.getByText(formatPotContext(biggestLosingHand))).toBeInTheDocument();
     expect(summaryInsights.getByText(`Hand ${biggestWinningHand.handId}`)).toBeInTheDocument();
     expect(summaryInsights.getByText(`Hand ${biggestLosingHand.handId}`)).toBeInTheDocument();
+
+    if (firstSession === undefined) {
+      throw new Error("Expected fixture to create at least one detected session.");
+    }
+
+    const sessions = within(getSectionForHeading("Sessions"));
+
+    expect(sessions.getByText("Total Sessions")).toBeInTheDocument();
+    expect(sessions.getByText("Best Session")).toBeInTheDocument();
+    expect(sessions.getByText("Worst Session")).toBeInTheDocument();
+    expect(sessions.getByText("Average Session Length")).toBeInTheDocument();
+    expect(sessions.getByText("Average Hands / Session")).toBeInTheDocument();
+    expect(sessions.getByText("Est. Tables")).toBeInTheDocument();
+    expect(sessions.getAllByRole("button", { name: "View" }).length).toBeGreaterThan(0);
 
     fireEvent.click(summaryInsights.getAllByRole("button", { name: "View" })[0] as HTMLElement);
 
@@ -286,6 +308,24 @@ describe("CoinPokerAnalyzer dashboard", () => {
     expect(explorer.getByLabelText("Sort By")).toBeInTheDocument();
     expect(explorer.getByLabelText("Direction")).toBeInTheDocument();
     expect(explorer.getByLabelText("Rows")).toBeInTheDocument();
+
+    fireEvent.click(sessions.getAllByRole("button", { name: "View" })[0] as HTMLElement);
+
+    expect(explorer.getByText("Showing Session")).toBeInTheDocument();
+    expect(explorer.getByRole("button", { name: "Clear Session Filter" })).toBeInTheDocument();
+    expect(
+      explorer.getByText(
+        `Showing ${firstSession.handCount} of ${firstSession.handCount} filtered hands.`,
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(explorer.getByRole("button", { name: "Clear Session Filter" }));
+
+    expect(explorer.queryByText("Showing Session")).not.toBeInTheDocument();
+    expect(
+      explorer.getByText(`Showing ${parsedHands.length} of ${parsedHands.length} filtered hands.`),
+    ).toBeInTheDocument();
+
     const viewButtons = explorer.getAllByRole("button", { name: "View" });
     const firstViewButton = viewButtons[0];
 

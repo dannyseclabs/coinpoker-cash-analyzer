@@ -12,7 +12,15 @@ export type HandExplorerDateRangeFilter =
   | "Last 7 days"
   | "Last 30 days"
   | "All hands";
-export type HandExplorerSortKey = "date" | "heroNet" | "pot" | "position";
+export type HandExplorerSortKey =
+  | "date"
+  | "heroNetBb"
+  | "potBb"
+  | "handId"
+  | "position"
+  | "heroCards"
+  | "showdown"
+  | "splashPot";
 export type HandExplorerSortDirection = "asc" | "desc";
 export type HandExplorerPageSize = 25 | 50 | 100;
 
@@ -57,6 +65,10 @@ function compareNumbers(left: number, right: number): number {
   return left - right;
 }
 
+function compareStrings(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true });
+}
+
 function getPositionIndex(position: PokerPosition): number {
   const index = POSITION_ORDER.indexOf(position);
 
@@ -82,6 +94,16 @@ function parseHandDate(hand: PokerHand): Date | null {
 
 function getHandTimestamp(hand: PokerHand): number {
   return parseHandDate(hand)?.getTime() ?? 0;
+}
+
+function getHeroNetBb(hand: PokerHand): number {
+  return hand.stakes.bigBlind > 0 ? hand.heroNetResult / hand.stakes.bigBlind : 0;
+}
+
+function getPotBb(hand: PokerHand): number {
+  return hand.totalPot !== null && hand.stakes.bigBlind > 0
+    ? hand.totalPot / hand.stakes.bigBlind
+    : 0;
 }
 
 function getStartOfLocalDay(date: Date): Date {
@@ -261,20 +283,38 @@ export function sortHands(hands: readonly PokerHand[], sort: HandExplorerSort): 
   return [...hands].sort((left, right) => {
     let comparison = 0;
 
-    if (sort.key === "heroNet") {
-      comparison = compareNumbers(left.heroNetResult, right.heroNetResult);
-    } else if (sort.key === "pot") {
-      comparison = compareNumbers(left.totalPot ?? 0, right.totalPot ?? 0);
+    if (sort.key === "heroNetBb") {
+      comparison = compareNumbers(getHeroNetBb(left), getHeroNetBb(right));
+    } else if (sort.key === "potBb") {
+      comparison = compareNumbers(getPotBb(left), getPotBb(right));
+    } else if (sort.key === "handId") {
+      comparison = compareStrings(left.handId, right.handId);
     } else if (sort.key === "position") {
       comparison = compareNumbers(
         getPositionIndex(left.heroPosition),
         getPositionIndex(right.heroPosition),
       );
+    } else if (sort.key === "heroCards") {
+      comparison = compareStrings(
+        normalizeHoleCards(left.heroCards) ?? "",
+        normalizeHoleCards(right.heroCards) ?? "",
+      );
+    } else if (sort.key === "showdown") {
+      comparison = compareNumbers(
+        Number(didHeroReachShowdown(left)),
+        Number(didHeroReachShowdown(right)),
+      );
+    } else if (sort.key === "splashPot") {
+      comparison = compareNumbers(Number(isSplashPot(left)), Number(isSplashPot(right)));
     } else {
       comparison = compareNumbers(getHandTimestamp(left), getHandTimestamp(right));
     }
 
-    return comparison * directionMultiplier;
+    if (comparison !== 0) {
+      return comparison * directionMultiplier;
+    }
+
+    return compareNumbers(getHandTimestamp(left), getHandTimestamp(right)) * -1;
   });
 }
 

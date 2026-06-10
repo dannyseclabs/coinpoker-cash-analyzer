@@ -9,6 +9,7 @@ import {
   getBiggestWinningHand,
   getMostPlayedStartingHand,
   getMostProfitableStartingHand,
+  getNormalSummaryHands,
   getWorstPositionInsight,
   getWorstStartingHand,
 } from "../lib/stats/summaryInsights";
@@ -186,6 +187,61 @@ describe("summaryInsights", () => {
       totalBigBlindsWon: 3,
       bbPer100: 100,
     });
+  });
+
+  it("excludes splash pot losses from the normal worst starting hand", () => {
+    const hands = [
+      ...repeatHands(3, (index) => ({
+        heroCards: index % 2 === 0 ? ["Jh", "2c"] : ["Js", "2d"],
+        heroNetResult: -2.19,
+        totalPot: 10,
+      })),
+      ...repeatHands(3, () => ({
+        heroCards: ["Ah", "4d"],
+        heroNetResult: -0.2,
+        totalPot: 1,
+      })),
+    ];
+    const normalMatrix = createHoleCardMatrix(getNormalSummaryHands(hands));
+
+    expect(getWorstStartingHand(normalMatrix)).toMatchObject({
+      label: "A4o",
+      totalProfit: -0.6,
+    });
+  });
+
+  it("excludes splash pot wins from the normal most profitable starting hand", () => {
+    const hands = [
+      ...repeatHands(3, (index) => ({
+        heroCards: index % 2 === 0 ? ["Jh", "2c"] : ["Js", "2d"],
+        heroNetResult: 5,
+        totalPot: 20,
+      })),
+      ...repeatHands(3, () => ({
+        heroCards: ["Kh", "Qh"],
+        heroNetResult: 0.2,
+        totalPot: 1,
+      })),
+    ];
+    const normalMatrix = createHoleCardMatrix(getNormalSummaryHands(hands));
+
+    expect(getMostProfitableStartingHand(normalMatrix)).toMatchObject({
+      label: "KQs",
+      totalProfit: 0.6,
+    });
+  });
+
+  it("does not show a starting hand as normal most or worst when all samples are splash pots", () => {
+    const hands = repeatHands(3, (index) => ({
+      heroCards: index % 2 === 0 ? ["Jh", "2c"] : ["Js", "2d"],
+      heroNetResult: -2.19,
+      totalPot: 10,
+    }));
+    const normalMatrix = createHoleCardMatrix(getNormalSummaryHands(hands));
+
+    expect(getMostProfitableStartingHand(normalMatrix)).toBeNull();
+    expect(getWorstStartingHand(normalMatrix)).toBeNull();
+    expect(getMostPlayedStartingHand(normalMatrix)).toBeNull();
   });
 
   it("selects the biggest winning and losing individual hands", () => {

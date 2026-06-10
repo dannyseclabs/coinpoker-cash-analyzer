@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AlertTriangle, UploadCloud } from "lucide-react";
 
 import {
@@ -29,6 +29,7 @@ import {
 } from "@/src/lib/formatPoker";
 import { detectLeaks } from "@/src/lib/leaks/detectLeaks";
 import { parseCoinPokerFile } from "@/src/lib/parser/parseCoinPokerFile";
+import { detectPokerSessions, type PokerSession } from "@/src/lib/sessions";
 import { calculateStats } from "@/src/lib/stats/calculateStats";
 import {
   createHoleCardMatrix,
@@ -49,6 +50,7 @@ import {
   getBiggestWinningHand,
   getMostPlayedStartingHand,
   getMostProfitableStartingHand,
+  getNormalSummaryHands,
   getWorstPositionInsight,
   getWorstStartingHand,
   type HandInsight,
@@ -155,9 +157,13 @@ const HAND_EXPLORER_SORT_OPTIONS: readonly {
   readonly value: HandExplorerSortKey;
 }[] = [
   { label: "Date", value: "date" },
-  { label: "Hero Net", value: "heroNet" },
-  { label: "Pot", value: "pot" },
+  { label: "Hero Net BB", value: "heroNetBb" },
+  { label: "Pot BB", value: "potBb" },
+  { label: "Hand ID", value: "handId" },
   { label: "Position", value: "position" },
+  { label: "Hero Cards", value: "heroCards" },
+  { label: "Showdown", value: "showdown" },
+  { label: "Splash Pot", value: "splashPot" },
 ];
 const HAND_EXPLORER_SORT_DIRECTION_OPTIONS: readonly {
   readonly label: string;
@@ -295,6 +301,10 @@ function formatHandsCount(value: number): string {
   return `${formatNumber(value)} ${value === 1 ? "hand" : "hands"}`;
 }
 
+function formatSessionsCount(value: number): string {
+  return `${formatNumber(value)} ${value === 1 ? "Session" : "Sessions"}`;
+}
+
 function formatPercent(value: number): string {
   return `${formatNumber(value)}%`;
 }
@@ -321,6 +331,35 @@ function formatNullableCurrency(value: number | null): string {
 
 function formatNullablePokerResult(amount: number | null, bigBlind: number) {
   return amount === null ? null : formatPokerResult(amount, bigBlind, { signed: false });
+}
+
+function formatDuration(minutes: number): string {
+  const roundedMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(roundedMinutes / 60);
+  const remainingMinutes = roundedMinutes % 60;
+
+  if (hours === 0) {
+    return `${remainingMinutes}m`;
+  }
+
+  if (remainingMinutes === 0) {
+    return `${hours}h`;
+  }
+
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function formatSessionDate(value: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(value);
+}
+
+function formatSessionDateRange(session: PokerSession): string {
+  return `${formatSessionDate(session.startTime)} → ${formatSessionDate(session.endTime)}`;
 }
 
 function getPokerResultTextClass(sign: ReturnType<typeof formatPokerResult>["sign"]): string {
@@ -1091,6 +1130,168 @@ function SummaryHandInsightHighlight({ insight }: Readonly<{ insight: HandInsigh
   );
 }
 
+function SessionProfitDisplay({
+  session,
+  size = "base",
+}: Readonly<{
+  session: PokerSession;
+  size?: "base" | "large";
+}>) {
+  return (
+    <span className="flex flex-col items-start gap-0.5">
+      <span
+        className={`font-mono font-semibold tabular-nums ${size === "large" ? "text-2xl" : "text-sm"} ${getBigBlindCountTextClass(
+          session.profitBb,
+        )}`}
+      >
+        {formatSignedBigBlindCount(session.profitBb)}
+      </span>
+      <span className="font-mono text-xs font-medium tabular-nums text-zinc-500">
+        {formatCurrency(session.profitAmount)}
+      </span>
+    </span>
+  );
+}
+
+function SessionWarnings({ session }: Readonly<{ session: PokerSession }>) {
+  const warnings = [
+    session.handCount < 50 ? "Small Session Sample" : null,
+    session.durationMinutes < 15 ? "Short Session" : null,
+  ].filter((warning): warning is string => warning !== null);
+
+  if (warnings.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {warnings.map((warning) => (
+        <span
+          key={warning}
+          className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800"
+        >
+          {warning}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function SessionsSection({
+  sessions,
+  selectedSessionId,
+  onSelectSession,
+}: Readonly<{
+  sessions: readonly PokerSession[];
+  selectedSessionId: string | null;
+  onSelectSession: (sessionId: string) => void;
+}>) {
+  const bestSession =
+    [...sessions].sort((left, right) => right.profitBb - left.profitBb)[0] ?? null;
+  const worstSession =
+    [...sessions].sort((left, right) => left.profitBb - right.profitBb)[0] ?? null;
+  const averageSessionLength =
+    sessions.length === 0
+      ? 0
+      : sessions.reduce((sum, session) => sum + session.durationMinutes, 0) / sessions.length;
+  const averageHands =
+    sessions.length === 0
+      ? 0
+      : sessions.reduce((sum, session) => sum + session.handCount, 0) / sessions.length;
+
+  return (
+    <section className={SECTION_GAP_CLASS}>
+      <SectionHeader
+        title="Sessions"
+        description="Detected from hand timestamps using a 30-minute inactivity gap."
+      />
+      <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <StatTile label="Total Sessions" value={formatSessionsCount(sessions.length)} />
+        <StatTile
+          label="Best Session"
+          secondaryValue={
+            bestSession === null ? undefined : formatCurrency(bestSession.profitAmount)
+          }
+          value={bestSession === null ? "-" : formatSignedBigBlindCount(bestSession.profitBb)}
+        />
+        <StatTile
+          label="Worst Session"
+          secondaryValue={
+            worstSession === null ? undefined : formatCurrency(worstSession.profitAmount)
+          }
+          value={worstSession === null ? "-" : formatSignedBigBlindCount(worstSession.profitBb)}
+        />
+        <StatTile label="Average Session Length" value={formatDuration(averageSessionLength)} />
+        <StatTile
+          label="Average Hands / Session"
+          value={formatHandsCount(Math.round(averageHands))}
+        />
+      </dl>
+      <div className={TABLE_CONTAINER_CLASS}>
+        <table className={`${TABLE_CLASS} min-w-[1180px]`}>
+          <thead className={TABLE_HEAD_CLASS}>
+            <tr>
+              <th className={TABLE_HEADER_CELL_CLASS}>Date</th>
+              <th className={TABLE_HEADER_CELL_CLASS}>Duration</th>
+              <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Hands</th>
+              <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Est. Tables</th>
+              <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Profit</th>
+              <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>BB/100</th>
+              <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>VPIP</th>
+              <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>PFR</th>
+              <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>WTSD</th>
+              <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Splash Pots</th>
+              <th className={TABLE_HEADER_CELL_CLASS}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sessions.map((session) => (
+              <tr
+                key={session.id}
+                className={`odd:bg-white even:bg-zinc-50/80 hover:bg-emerald-50/50 ${
+                  selectedSessionId === session.id ? "bg-emerald-50/70" : ""
+                }`}
+              >
+                <td className={TABLE_CELL_CLASS}>
+                  <span className="font-medium text-zinc-950">
+                    {formatSessionDate(session.startTime)}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-zinc-500">
+                    {formatSessionDate(session.endTime)}
+                  </span>
+                  <SessionWarnings session={session} />
+                </td>
+                <td className={TABLE_CELL_CLASS}>{formatDuration(session.durationMinutes)}</td>
+                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatNumber(session.handCount)}</td>
+                <td className={TABLE_NUMERIC_CELL_CLASS}>
+                  {formatNumber(session.estimatedTables)}
+                </td>
+                <td className={TABLE_NUMERIC_CELL_CLASS}>
+                  <SessionProfitDisplay session={session} />
+                </td>
+                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatSignedNumber(session.bbPer100)}</td>
+                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.vpip)}</td>
+                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.pfr)}</td>
+                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.wtsd)}</td>
+                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatNumber(session.splashPotCount)}</td>
+                <td className={TABLE_CELL_CLASS}>
+                  <button
+                    className={SMALL_BUTTON_CLASS}
+                    type="button"
+                    onClick={() => onSelectSession(session.id)}
+                  >
+                    View
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function HandDetailPanel({
   hand,
   onClose,
@@ -1382,6 +1583,7 @@ export function CoinPokerAnalyzer() {
   const [isReading, setIsReading] = useState(false);
   const [selectedHoleCard, setSelectedHoleCard] = useState<string | null>(null);
   const [selectedHand, setSelectedHand] = useState<PokerHand | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [handExplorerFilters, setHandExplorerFilters] = useState<HandExplorerFilters>(
     DEFAULT_HAND_EXPLORER_FILTERS,
   );
@@ -1393,13 +1595,20 @@ export function CoinPokerAnalyzer() {
   const [handExplorerPageSize, setHandExplorerPageSize] = useState<HandExplorerPageSize>(25);
   const [holeCardMatrixMetric, setHoleCardMatrixMetric] =
     useState<HoleCardMatrixMetric>("bbPer100");
+  const handExplorerSectionRef = useRef<HTMLElement | null>(null);
 
+  const sessions = useMemo(
+    () => (result === null ? [] : detectPokerSessions(result.hands)),
+    [result],
+  );
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.id === selectedSessionId) ?? null,
+    [selectedSessionId, sessions],
+  );
+  const handExplorerSourceHands = selectedSession?.hands ?? result?.hands ?? [];
   const filteredAndSortedHands = useMemo(
-    () =>
-      result === null
-        ? []
-        : getFilteredAndSortedHands(result.hands, handExplorerFilters, handExplorerSort),
-    [handExplorerFilters, handExplorerSort, result],
+    () => getFilteredAndSortedHands(handExplorerSourceHands, handExplorerFilters, handExplorerSort),
+    [handExplorerFilters, handExplorerSort, handExplorerSourceHands],
   );
   const handExplorerSummary = useMemo(
     () => getHandExplorerSummary(filteredAndSortedHands),
@@ -1414,21 +1623,29 @@ export function CoinPokerAnalyzer() {
     [filteredAndSortedHands, handExplorerPage, handExplorerPageSize],
   );
   const visibleHands = handExplorerPageResult.hands;
+  const normalSummaryHands = useMemo(
+    () => (result === null ? [] : getNormalSummaryHands(result.hands)),
+    [result],
+  );
   const holeCardMatrix = useMemo(
     () => (result === null ? null : createHoleCardMatrix(result.hands)),
     [result],
   );
+  const summaryHoleCardMatrix = useMemo(
+    () => (result === null ? null : createHoleCardMatrix(normalSummaryHands)),
+    [normalSummaryHands, result],
+  );
   const summaryStartingHandInsights = useMemo(() => {
-    if (holeCardMatrix === null) {
+    if (summaryHoleCardMatrix === null) {
       return null;
     }
 
     return {
-      mostProfitable: getMostProfitableStartingHand(holeCardMatrix),
-      worst: getWorstStartingHand(holeCardMatrix),
-      mostPlayed: getMostPlayedStartingHand(holeCardMatrix),
+      mostProfitable: getMostProfitableStartingHand(summaryHoleCardMatrix),
+      worst: getWorstStartingHand(summaryHoleCardMatrix),
+      mostPlayed: getMostPlayedStartingHand(summaryHoleCardMatrix),
     };
-  }, [holeCardMatrix]);
+  }, [summaryHoleCardMatrix]);
   const summaryHandInsights = useMemo(() => {
     if (result === null) {
       return null;
@@ -1473,16 +1690,20 @@ export function CoinPokerAnalyzer() {
     () => (result === null ? [] : getDisplayPositionStats(result.stats)),
     [result],
   );
+  const summaryPositionStats = useMemo(
+    () => (result === null ? [] : getDisplayPositionStats(calculateStats(normalSummaryHands))),
+    [normalSummaryHands, result],
+  );
   const summaryPositionInsights = useMemo(() => {
-    if (positionStats.length === 0) {
+    if (summaryPositionStats.length === 0) {
       return null;
     }
 
     return {
-      best: getBestPositionInsight(positionStats),
-      worst: getWorstPositionInsight(positionStats),
+      best: getBestPositionInsight(summaryPositionStats),
+      worst: getWorstPositionInsight(summaryPositionStats),
     };
-  }, [positionStats]);
+  }, [summaryPositionStats]);
   const positionHighlights = useMemo(() => {
     if (positionStats.length === 0) {
       return null;
@@ -1498,6 +1719,7 @@ export function CoinPokerAnalyzer() {
     setResult(null);
     setSelectedHoleCard(null);
     setSelectedHand(null);
+    setSelectedSessionId(null);
     setHandExplorerFilters(DEFAULT_HAND_EXPLORER_FILTERS);
     setHandExplorerSort({ key: "date", direction: "desc" });
     setHandExplorerPage(1);
@@ -1539,6 +1761,30 @@ export function CoinPokerAnalyzer() {
     } finally {
       setIsReading(false);
       event.target.value = "";
+    }
+  }
+
+  function scrollHandExplorerIntoView(): void {
+    const handExplorerSection = handExplorerSectionRef.current;
+
+    if (handExplorerSection === null || typeof handExplorerSection.scrollIntoView !== "function") {
+      return;
+    }
+
+    handExplorerSection.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
+  function handleSelectSession(sessionId: string): void {
+    setSelectedSessionId(sessionId);
+    setHandExplorerPage(1);
+
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(scrollHandExplorerIntoView);
+    } else {
+      scrollHandExplorerIntoView();
     }
   }
 
@@ -1669,6 +1915,9 @@ export function CoinPokerAnalyzer() {
                   title="Summary Insights"
                   description="Quick highlights from the imported hand history."
                 />
+                <p className="-mt-2 text-xs font-medium text-zinc-500">
+                  Normal insights exclude splash pots.
+                </p>
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                   <SummaryInsightCard
                     highlight={
@@ -1868,6 +2117,12 @@ export function CoinPokerAnalyzer() {
                 </div>
               </section>
             ) : null}
+
+            <SessionsSection
+              sessions={sessions}
+              selectedSessionId={selectedSessionId}
+              onSelectSession={handleSelectSession}
+            />
 
             {positionHighlights !== null ? (
               <section className={SECTION_GAP_CLASS}>
@@ -2139,7 +2394,7 @@ export function CoinPokerAnalyzer() {
               </section>
             ) : null}
 
-            <section className={SECTION_GAP_CLASS}>
+            <section ref={handExplorerSectionRef} className={SECTION_GAP_CLASS}>
               <SectionHeader title="Leaks" />
               {result.leaks.length > 0 ? (
                 <ul className="grid gap-3">
@@ -2195,6 +2450,28 @@ export function CoinPokerAnalyzer() {
                   filteredAndSortedHands.length,
                 )} filtered hands.`}
               />
+              {selectedSession === null ? null : (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm shadow-sm">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
+                      Showing Session
+                    </p>
+                    <p className="mt-1 font-mono font-semibold tabular-nums text-emerald-950">
+                      {formatSessionDateRange(selectedSession)}
+                    </p>
+                  </div>
+                  <button
+                    className={SMALL_BUTTON_CLASS}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSessionId(null);
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    Clear Session Filter
+                  </button>
+                </div>
+              )}
               <dl className="grid gap-4 sm:grid-cols-3">
                 <StatTile
                   label="Filtered hands"

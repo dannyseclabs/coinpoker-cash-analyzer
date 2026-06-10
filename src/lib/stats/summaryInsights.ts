@@ -86,6 +86,10 @@ function getQualifiedStartingHands(matrix: HoleCardMatrixResult): HoleCardMatrix
   );
 }
 
+export function getNormalSummaryHands(hands: readonly PokerHand[]): PokerHand[] {
+  return hands.filter((hand) => !isSplashPot(hand));
+}
+
 export function getMostProfitableStartingHand(
   matrix: HoleCardMatrixResult,
 ): StartingHandInsight | null {
