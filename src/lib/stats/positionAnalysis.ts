@@ -4,7 +4,11 @@ export const DISPLAY_POSITIONS: readonly PokerPosition[] = ["UTG", "HJ", "CO", "
 
 export const MIN_RELIABLE_HIGHLIGHT_HANDS = 30;
 
-export type PositionSampleLabel = "Small sample" | "Medium sample" | "Reliable sample";
+export type PositionSampleLabel =
+  | "Very Small Sample"
+  | "Small Sample"
+  | "Medium Sample"
+  | "Reliable Sample";
 
 export interface PositionHighlights {
   readonly best: PositionStats | null;
@@ -18,14 +22,18 @@ export function getDisplayPositionStats(stats: StatisticsResult): PositionStats[
 
 export function getPositionSampleLabel(handsPlayed: number): PositionSampleLabel {
   if (handsPlayed < 30) {
-    return "Small sample";
+    return "Very Small Sample";
   }
 
   if (handsPlayed < 100) {
-    return "Medium sample";
+    return "Small Sample";
   }
 
-  return "Reliable sample";
+  if (handsPlayed < 300) {
+    return "Medium Sample";
+  }
+
+  return "Reliable Sample";
 }
 
 export function pickBestPosition(positionStats: readonly PositionStats[]): PositionStats | null {

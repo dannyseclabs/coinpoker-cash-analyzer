@@ -1,9 +1,11 @@
 import { HOLE_CARD_RANKS, normalizeHoleCards } from "./stats/holeCardMatrix";
+import { isSplashPot } from "./stats/splashPots";
 import type { PokerHand, PokerPosition } from "../types";
 
 export type HandExplorerPositionFilter = "All" | Exclude<PokerPosition, "UNKNOWN">;
 export type HandExplorerResultFilter = "All" | "Won" | "Lost" | "Break-even";
 export type HandExplorerShowdownFilter = "All" | "Showdown" | "No Showdown";
+export type HandExplorerSplashPotFilter = "All" | "Normal only" | "Splash only";
 export type HandExplorerDateRangeFilter =
   | "Today"
   | "Yesterday"
@@ -18,6 +20,7 @@ export interface HandExplorerFilters {
   readonly position: HandExplorerPositionFilter;
   readonly result: HandExplorerResultFilter;
   readonly showdown: HandExplorerShowdownFilter;
+  readonly splashPots: HandExplorerSplashPotFilter;
   readonly dateRange: HandExplorerDateRangeFilter;
   readonly heroCardsSearch: string;
 }
@@ -209,6 +212,14 @@ function matchesShowdown(hand: PokerHand, showdown: HandExplorerShowdownFilter):
   return showdown === "Showdown" ? didHeroReachShowdown(hand) : !didHeroReachShowdown(hand);
 }
 
+function matchesSplashPots(hand: PokerHand, splashPots: HandExplorerSplashPotFilter): boolean {
+  if (splashPots === "All") {
+    return true;
+  }
+
+  return splashPots === "Splash only" ? isSplashPot(hand) : !isSplashPot(hand);
+}
+
 function matchesHeroCardsSearch(hand: PokerHand, heroCardsSearch: string): boolean {
   const trimmedSearch = heroCardsSearch.trim();
 
@@ -238,6 +249,7 @@ export function filterHands(
       matchesPosition(hand, filters.position) &&
       matchesResult(hand, filters.result) &&
       matchesShowdown(hand, filters.showdown) &&
+      matchesSplashPots(hand, filters.splashPots) &&
       matchesDateRange(hand, filters.dateRange, referenceDate) &&
       matchesHeroCardsSearch(hand, filters.heroCardsSearch),
   );

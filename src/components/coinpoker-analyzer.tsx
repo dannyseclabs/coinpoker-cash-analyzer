@@ -16,6 +16,7 @@ import {
   type HandExplorerPositionFilter,
   type HandExplorerResultFilter,
   type HandExplorerShowdownFilter,
+  type HandExplorerSplashPotFilter,
   type HandExplorerSort,
   type HandExplorerSortDirection,
   type HandExplorerSortKey,
@@ -43,6 +44,8 @@ import {
 import {
   getBestPositionInsight,
   getBiggestLosingHand,
+  getBiggestSplashPotLosingHand,
+  getBiggestSplashPotWinningHand,
   getBiggestWinningHand,
   getMostPlayedStartingHand,
   getMostProfitableStartingHand,
@@ -52,6 +55,7 @@ import {
   type PositionInsight,
   type StartingHandInsight,
 } from "@/src/lib/stats/summaryInsights";
+import { classifySplashPot } from "@/src/lib/stats/splashPots";
 import type { HandAction, LeakResult, PokerHand, PokerStreet, StatisticsResult } from "@/src/types";
 
 interface AnalyzerResult {
@@ -109,6 +113,7 @@ const DEFAULT_HAND_EXPLORER_FILTERS: HandExplorerFilters = {
   position: "All",
   result: "All",
   showdown: "All",
+  splashPots: "All",
   dateRange: "All hands",
   heroCardsSearch: "",
 };
@@ -132,6 +137,11 @@ const SHOWDOWN_FILTER_OPTIONS: readonly HandExplorerShowdownFilter[] = [
   "All",
   "Showdown",
   "No Showdown",
+];
+const SPLASH_POT_FILTER_OPTIONS: readonly HandExplorerSplashPotFilter[] = [
+  "All",
+  "Normal only",
+  "Splash only",
 ];
 const DATE_RANGE_FILTER_OPTIONS: readonly HandExplorerDateRangeFilter[] = [
   "Today",
@@ -313,8 +323,48 @@ function formatNullablePokerResult(amount: number | null, bigBlind: number) {
   return amount === null ? null : formatPokerResult(amount, bigBlind, { signed: false });
 }
 
+function getPokerResultTextClass(sign: ReturnType<typeof formatPokerResult>["sign"]): string {
+  if (sign === "positive") {
+    return "text-emerald-700";
+  }
+
+  if (sign === "negative") {
+    return "text-red-700";
+  }
+
+  return "text-zinc-500";
+}
+
+function getBigBlindCountTextClass(bigBlinds: number): string {
+  if (bigBlinds > 0) {
+    return "text-emerald-700";
+  }
+
+  if (bigBlinds < 0) {
+    return "text-red-700";
+  }
+
+  return "text-zinc-500";
+}
+
 function formatHeroShowdownStatus(hand: PokerHand): string {
   return didHeroReachShowdown(hand) ? "Yes" : "No";
+}
+
+function getHandEndedOn(hand: PokerHand): string {
+  if (hand.board.river !== null) {
+    return "River";
+  }
+
+  if (hand.board.turn !== null) {
+    return "Turn";
+  }
+
+  if (hand.board.flop !== null) {
+    return "Flop";
+  }
+
+  return "Preflop";
 }
 
 function formatActionType(type: HandAction["type"]): string {
@@ -915,13 +965,52 @@ function PositionHighlight({
   );
 }
 
+function PositionResultHighlight({
+  label,
+  stats,
+}: Readonly<{
+  label: string;
+  stats: PositionInsight | null;
+}>) {
+  return (
+    <div className={`${CARD_CLASS} p-4`}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dd className="mt-2 flex flex-col gap-2">
+        <span className="text-2xl font-semibold tracking-tight text-zinc-950">
+          {stats?.position ?? "Not enough sample"}
+        </span>
+        {stats === null ? null : (
+          <>
+            <span
+              className={`font-mono text-xl font-semibold tabular-nums ${getBigBlindCountTextClass(
+                stats.totalBigBlindsWon,
+              )}`}
+            >
+              {formatSignedBigBlindCount(stats.totalBigBlindsWon)}
+            </span>
+            <span className="font-mono text-sm font-medium tabular-nums text-zinc-600">
+              {formatCurrency(stats.totalProfit)}
+            </span>
+            <span className="mt-1 font-mono text-sm font-medium tabular-nums text-zinc-600">
+              {formatNumber(stats.bbPer100)} BB/100
+            </span>
+            <span className="text-xs font-medium text-zinc-500">
+              {formatHandsCount(stats.handsPlayed)}
+            </span>
+          </>
+        )}
+      </dd>
+    </div>
+  );
+}
+
 function formatStartingHandSecondaryContext(insight: StartingHandInsight): string {
-  return `${formatCurrency(insight.totalProfit)} · ${formatHandsCount(insight.handsPlayed)}`;
+  return formatHandsCount(insight.handsPlayed);
 }
 
 function formatStartingHandMetaContext(insight: StartingHandInsight): string {
   if (insight.handsPlayed < 30) {
-    return `${insight.sampleLabel} · BB/100 ${formatSignedNumber(insight.bbPer100)} (low confidence)`;
+    return insight.sampleLabel;
   }
 
   return `BB/100 ${formatSignedNumber(insight.bbPer100)} · ${insight.sampleLabel}`;
@@ -950,9 +1039,16 @@ function SummaryStartingHandInsightHighlight({
   insight,
 }: Readonly<{ insight: StartingHandInsight }>) {
   return (
-    <p className="font-mono text-lg font-semibold tabular-nums text-zinc-950">
-      {formatSignedBigBlindCount(insight.totalBigBlindsWon)}
-    </p>
+    <div className="space-y-1">
+      <p
+        className={`font-mono text-lg font-semibold tabular-nums ${getBigBlindCountTextClass(
+          insight.totalBigBlindsWon,
+        )}`}
+      >
+        {formatSignedBigBlindCount(insight.totalBigBlindsWon)}
+      </p>
+      <p className="text-sm font-medium text-zinc-700">{formatCurrency(insight.totalProfit)}</p>
+    </div>
   );
 }
 
@@ -961,8 +1057,11 @@ function SummaryMostPlayedStartingHandInsightHighlight({
 }: Readonly<{ insight: StartingHandInsight }>) {
   return (
     <div className="space-y-1">
-      <p className="text-sm font-medium text-zinc-700">{formatHandsCount(insight.handsPlayed)}</p>
-      <p className="font-mono text-lg font-semibold tabular-nums text-zinc-950">
+      <p
+        className={`font-mono text-lg font-semibold tabular-nums ${getBigBlindCountTextClass(
+          insight.totalBigBlindsWon,
+        )}`}
+      >
         {formatSignedBigBlindCount(insight.totalBigBlindsWon)}
       </p>
       <p className="text-sm font-medium text-zinc-700">{formatCurrency(insight.totalProfit)}</p>
@@ -976,12 +1075,17 @@ function SummaryHandInsightHighlight({ insight }: Readonly<{ insight: HandInsigh
   return (
     <div className="space-y-1">
       <p className="font-mono text-lg font-semibold tabular-nums text-zinc-950">
-        {heroNet.bbLabel}
+        <span className={getPokerResultTextClass(heroNet.sign)}>{heroNet.bbLabel}</span>
       </p>
       <p className="text-sm font-medium text-zinc-700">
         {heroNet.currencyLabel} · {insight.position}
       </p>
       <p className="text-xs leading-5 text-zinc-500">{formatHandMetaContext(insight)}</p>
+      {insight.isSplashPot ? (
+        <p className="w-fit rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+          SPLASH POT
+        </p>
+      ) : null}
       <p className="font-mono text-xs leading-5 text-zinc-500">Hand {insight.handId}</p>
     </div>
   );
@@ -997,6 +1101,7 @@ function HandDetailPanel({
   const boardCards = formatBoard(hand);
   const heroNet = formatPokerResult(hand.heroNetResult, hand.stakes.bigBlind);
   const totalPot = formatNullablePokerResult(hand.totalPot, hand.stakes.bigBlind);
+  const splashPot = classifySplashPot(hand);
 
   return (
     <div
@@ -1041,7 +1146,11 @@ function HandDetailPanel({
             <div>
               <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero net</dt>
               <dd className="mt-1 flex flex-col font-mono tabular-nums">
-                <span className="text-base font-semibold text-zinc-950">{heroNet.bbLabel}</span>
+                <span
+                  className={`text-base font-semibold ${getPokerResultTextClass(heroNet.sign)}`}
+                >
+                  {heroNet.bbLabel}
+                </span>
                 <span className="text-xs font-medium text-zinc-500">{heroNet.currencyLabel}</span>
               </dd>
             </div>
@@ -1056,6 +1165,43 @@ function HandDetailPanel({
                 </dd>
               </div>
             )}
+          </dl>
+          <dl className="mt-4 grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Result
+              </dt>
+              <dd
+                className={`mt-1 font-mono text-base font-semibold tabular-nums ${getPokerResultTextClass(
+                  heroNet.sign,
+                )}`}
+              >
+                {heroNet.bbLabel}
+              </dd>
+              {splashPot.isSplashPot ? (
+                <p className="mt-2 w-fit rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                  SPLASH POT
+                </p>
+              ) : null}
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Showdown
+              </dt>
+              <dd className="mt-1 font-semibold text-zinc-950">{formatHeroShowdownStatus(hand)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Ended On
+              </dt>
+              <dd className="mt-1 font-semibold text-zinc-950">{getHandEndedOn(hand)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Players
+              </dt>
+              <dd className="mt-1 font-semibold text-zinc-950">{hand.players.length}-handed</dd>
+            </div>
           </dl>
         </header>
 
@@ -1291,6 +1437,8 @@ export function CoinPokerAnalyzer() {
     return {
       biggestWinning: getBiggestWinningHand(result.hands),
       biggestLosing: getBiggestLosingHand(result.hands),
+      biggestSplashPotWinning: getBiggestSplashPotWinningHand(result.hands),
+      biggestSplashPotLosing: getBiggestSplashPotLosingHand(result.hands),
     };
   }, [result]);
   const selectedHoleCardCell =
@@ -1583,6 +1731,11 @@ export function CoinPokerAnalyzer() {
                         ? "Upload hands with Hero hole cards"
                         : formatStartingHandMetaContext(summaryStartingHandInsights.mostPlayed)
                     }
+                    secondaryContext={
+                      summaryStartingHandInsights.mostPlayed === null
+                        ? undefined
+                        : formatStartingHandSecondaryContext(summaryStartingHandInsights.mostPlayed)
+                    }
                   />
                   <SummaryInsightCard
                     action={
@@ -1636,6 +1789,54 @@ export function CoinPokerAnalyzer() {
                         : formatCards(summaryHandInsights.biggestLosing.heroCards)
                     }
                   />
+                  {summaryHandInsights.biggestSplashPotWinning === null ? null : (
+                    <SummaryInsightCard
+                      action={
+                        <button
+                          className={SMALL_BUTTON_CLASS}
+                          type="button"
+                          onClick={() =>
+                            setSelectedHand(
+                              summaryHandInsights.biggestSplashPotWinning?.hand ?? null,
+                            )
+                          }
+                        >
+                          View
+                        </button>
+                      }
+                      highlight={
+                        <SummaryHandInsightHighlight
+                          insight={summaryHandInsights.biggestSplashPotWinning}
+                        />
+                      }
+                      label="Biggest Splash Pot Won"
+                      mainValue={formatCards(summaryHandInsights.biggestSplashPotWinning.heroCards)}
+                    />
+                  )}
+                  {summaryHandInsights.biggestSplashPotLosing === null ? null : (
+                    <SummaryInsightCard
+                      action={
+                        <button
+                          className={SMALL_BUTTON_CLASS}
+                          type="button"
+                          onClick={() =>
+                            setSelectedHand(
+                              summaryHandInsights.biggestSplashPotLosing?.hand ?? null,
+                            )
+                          }
+                        >
+                          View
+                        </button>
+                      }
+                      highlight={
+                        <SummaryHandInsightHighlight
+                          insight={summaryHandInsights.biggestSplashPotLosing}
+                        />
+                      }
+                      label="Biggest Splash Pot Lost"
+                      mainValue={formatCards(summaryHandInsights.biggestSplashPotLosing.heroCards)}
+                    />
+                  )}
                   <SummaryInsightCard
                     label="Best Position"
                     mainValue={summaryPositionInsights.best?.position ?? "Not enough sample"}
@@ -1675,31 +1876,10 @@ export function CoinPokerAnalyzer() {
                   description="Position results are noisy on small samples. Use at least 1,000+ hands for meaningful winrate conclusions."
                 />
                 <dl className="grid gap-4 md:grid-cols-3">
-                  <PositionHighlight
-                    label="Best Position"
-                    title={positionHighlights.best?.position ?? "Not enough sample"}
-                    value={
-                      positionHighlights.best === null
-                        ? undefined
-                        : `Profit ${formatSignedBigBlindCount(
-                            positionHighlights.best.totalBigBlindsWon,
-                          )} · ${formatCurrency(
-                            positionHighlights.best.totalProfit,
-                          )} · ${formatSignedNumber(positionHighlights.best.bbPer100)} BB/100`
-                    }
-                  />
-                  <PositionHighlight
+                  <PositionResultHighlight label="Best Position" stats={positionHighlights.best} />
+                  <PositionResultHighlight
                     label="Worst Position"
-                    title={positionHighlights.worst?.position ?? "Not enough sample"}
-                    value={
-                      positionHighlights.worst === null
-                        ? undefined
-                        : `Profit ${formatSignedBigBlindCount(
-                            positionHighlights.worst.totalBigBlindsWon,
-                          )} · ${formatCurrency(
-                            positionHighlights.worst.totalProfit,
-                          )} · ${formatSignedNumber(positionHighlights.worst.bbPer100)} BB/100`
-                    }
+                    stats={positionHighlights.worst}
                   />
                   <PositionHighlight
                     label="Most Active Position"
@@ -1855,7 +2035,11 @@ export function CoinPokerAnalyzer() {
                         <div>
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">Profit</dt>
                           <dd className="mt-1 flex flex-col font-mono tabular-nums">
-                            <span className="font-semibold text-zinc-950">
+                            <span
+                              className={`font-semibold ${getBigBlindCountTextClass(
+                                selectedHoleCardCell.totalBigBlindsWon,
+                              )}`}
+                            >
                               {formatSignedBigBlindCount(selectedHoleCardCell.totalBigBlindsWon)}
                             </span>
                             <span className="text-xs font-medium text-zinc-500">
@@ -1915,7 +2099,11 @@ export function CoinPokerAnalyzer() {
                                   <td className={TABLE_CELL_CLASS}>{occurrence.date}</td>
                                   <td className={TABLE_CELL_CLASS}>{occurrence.position}</td>
                                   <td className={TABLE_NUMERIC_CELL_CLASS}>
-                                    <span className="block font-semibold text-zinc-950">
+                                    <span
+                                      className={`block font-semibold ${getBigBlindCountTextClass(
+                                        occurrence.bigBlindsWon,
+                                      )}`}
+                                    >
                                       {formatSignedBigBlindCount(occurrence.bigBlindsWon)}
                                     </span>
                                     <span className="block text-xs text-zinc-500">
@@ -2022,7 +2210,7 @@ export function CoinPokerAnalyzer() {
                   value={formatSignedNumber(handExplorerSummary.bbPer100)}
                 />
               </dl>
-              <div className={`${CARD_CLASS} grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-7`}>
+              <div className={`${CARD_CLASS} grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-8`}>
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
                     Position
@@ -2085,6 +2273,28 @@ export function CoinPokerAnalyzer() {
                     {SHOWDOWN_FILTER_OPTIONS.map((showdownFilter) => (
                       <option key={showdownFilter} value={showdownFilter}>
                         {showdownFilter}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Splash Pots
+                  </span>
+                  <select
+                    className={CONTROL_CLASS}
+                    value={handExplorerFilters.splashPots}
+                    onChange={(event) => {
+                      setHandExplorerFilters((filters) => ({
+                        ...filters,
+                        splashPots: event.target.value as HandExplorerSplashPotFilter,
+                      }));
+                      setHandExplorerPage(1);
+                    }}
+                  >
+                    {SPLASH_POT_FILTER_OPTIONS.map((splashPotFilter) => (
+                      <option key={splashPotFilter} value={splashPotFilter}>
+                        {splashPotFilter}
                       </option>
                     ))}
                   </select>
@@ -2250,6 +2460,7 @@ export function CoinPokerAnalyzer() {
                       visibleHands.map((hand) => {
                         const pot = formatNullablePokerResult(hand.totalPot, hand.stakes.bigBlind);
                         const heroNet = formatPokerResult(hand.heroNetResult, hand.stakes.bigBlind);
+                        const splashPot = classifySplashPot(hand);
 
                         return (
                           <tr
@@ -2258,6 +2469,11 @@ export function CoinPokerAnalyzer() {
                           >
                             <td className={`${TABLE_CELL_CLASS} font-mono font-medium`}>
                               {hand.handId}
+                              {splashPot.isSplashPot ? (
+                                <span className="mt-1 block w-fit rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                                  SPLASH
+                                </span>
+                              ) : null}
                             </td>
                             <td className={TABLE_CELL_CLASS}>{hand.date}</td>
                             <td className={TABLE_CELL_CLASS}>{hand.tableName ?? "-"}</td>
@@ -2280,7 +2496,11 @@ export function CoinPokerAnalyzer() {
                               </span>
                             </td>
                             <td className={TABLE_NUMERIC_CELL_CLASS}>
-                              <span className="block font-semibold text-zinc-950">
+                              <span
+                                className={`block font-semibold ${getPokerResultTextClass(
+                                  heroNet.sign,
+                                )}`}
+                              >
                                 {heroNet.bbLabel}
                               </span>
                               <span className="block text-xs text-zinc-500">

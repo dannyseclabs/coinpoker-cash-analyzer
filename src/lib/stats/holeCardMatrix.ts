@@ -19,9 +19,9 @@ export const HOLE_CARD_RANKS = [
 export type HoleCardRank = (typeof HOLE_CARD_RANKS)[number];
 
 export type HoleCardSampleLabel =
-  | "Very small sample"
-  | "Small Sample"
-  | "Medium Sample"
+  | "Very Small Sample"
+  | "Low Confidence"
+  | "Medium Confidence"
   | "Reliable Sample";
 
 export interface HoleCardOccurrence {
@@ -167,15 +167,15 @@ export function getMatrixNotation(rowRank: HoleCardRank, columnRank: HoleCardRan
 
 export function getHoleCardSampleLabel(handsPlayed: number): HoleCardSampleLabel {
   if (handsPlayed < 5) {
-    return "Very small sample";
-  }
-
-  if (handsPlayed < 10) {
-    return "Small Sample";
+    return "Very Small Sample";
   }
 
   if (handsPlayed < 30) {
-    return "Medium Sample";
+    return "Low Confidence";
+  }
+
+  if (handsPlayed < 100) {
+    return "Medium Confidence";
   }
 
   return "Reliable Sample";

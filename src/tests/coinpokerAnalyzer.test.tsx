@@ -9,6 +9,7 @@ import { parseCoinPokerFile } from "../lib/parser/parseCoinPokerFile";
 import { createHoleCardMatrix } from "../lib/stats/holeCardMatrix";
 import {
   getBiggestLosingHand,
+  getBiggestSplashPotLosingHand,
   getBiggestWinningHand,
   getMostProfitableStartingHand,
   getWorstStartingHand,
@@ -120,6 +121,8 @@ describe("CoinPokerAnalyzer dashboard", () => {
     expect(summaryInsights.getByText("Most Played Starting Hand")).toBeInTheDocument();
     expect(summaryInsights.getByText("Biggest Winning Hand")).toBeInTheDocument();
     expect(summaryInsights.getByText("Biggest Losing Hand")).toBeInTheDocument();
+    expect(summaryInsights.queryByText("Biggest Splash Pot Won")).not.toBeInTheDocument();
+    expect(summaryInsights.queryByText("Biggest Splash Pot Lost")).not.toBeInTheDocument();
     expect(summaryInsights.getAllByRole("button", { name: "View" })).toHaveLength(2);
 
     if (mostProfitableStartingHand !== null) {
@@ -130,10 +133,14 @@ describe("CoinPokerAnalyzer dashboard", () => {
         ),
       ).toBeInTheDocument();
       expect(
-        summaryInsights.getByText(
-          `${formatCurrency(mostProfitableStartingHand.totalProfit)} · ${mostProfitableStartingHand.handsPlayed} hands`,
-        ),
+        summaryInsights.getByText(formatCurrency(mostProfitableStartingHand.totalProfit)),
       ).toBeInTheDocument();
+      expect(
+        summaryInsights.getAllByText(`${mostProfitableStartingHand.handsPlayed} hands`).length,
+      ).toBeGreaterThan(0);
+      expect(
+        summaryInsights.getAllByText(mostProfitableStartingHand.sampleLabel).length,
+      ).toBeGreaterThan(0);
     }
 
     if (worstStartingHand !== null) {
@@ -142,10 +149,12 @@ describe("CoinPokerAnalyzer dashboard", () => {
         summaryInsights.getByText(formatSignedBBTotal(worstStartingHand.totalBigBlindsWon)),
       ).toBeInTheDocument();
       expect(
-        summaryInsights.getByText(
-          `${formatCurrency(worstStartingHand.totalProfit)} · ${worstStartingHand.handsPlayed} hands`,
-        ),
+        summaryInsights.getByText(formatCurrency(worstStartingHand.totalProfit)),
       ).toBeInTheDocument();
+      expect(
+        summaryInsights.getAllByText(`${worstStartingHand.handsPlayed} hands`).length,
+      ).toBeGreaterThan(0);
+      expect(summaryInsights.getAllByText(worstStartingHand.sampleLabel).length).toBeGreaterThan(0);
     }
 
     if (biggestWinningHand === null || biggestLosingHand === null) {
@@ -183,13 +192,13 @@ describe("CoinPokerAnalyzer dashboard", () => {
 
     expect(summaryInsightDetail.getByText(biggestWinningHand.handId)).toBeInTheDocument();
     expect(
-      summaryInsightDetail.getByText(
+      summaryInsightDetail.getAllByText(
         formatSignedBB(
           biggestWinningHand.hand.heroNetResult,
           biggestWinningHand.hand.stakes.bigBlind,
         ),
-      ),
-    ).toBeInTheDocument();
+      ).length,
+    ).toBeGreaterThan(0);
     if (firstPlayer !== undefined) {
       expect(
         summaryInsightDetail.getByText(
@@ -197,6 +206,14 @@ describe("CoinPokerAnalyzer dashboard", () => {
         ),
       ).toBeInTheDocument();
     }
+    expect(summaryInsightDetail.getAllByText("Result").length).toBeGreaterThan(0);
+    expect(summaryInsightDetail.getAllByText("Ended On").length).toBeGreaterThan(0);
+    expect(summaryInsightDetail.getAllByText("Players").length).toBeGreaterThan(0);
+    expect(
+      summaryInsightDetail.getByText((content) =>
+        content.includes(`${biggestWinningHand.hand.players.length}-handed`),
+      ),
+    ).toBeInTheDocument();
     expect(summaryInsightDetail.getByText("Raw Hand History")).toBeInTheDocument();
     expect(
       summaryInsightDetail.getByText((content) =>
@@ -263,6 +280,7 @@ describe("CoinPokerAnalyzer dashboard", () => {
     expect(explorer.getByLabelText("Position")).toBeInTheDocument();
     expect(explorer.getByLabelText("Result")).toBeInTheDocument();
     expect(explorer.getByLabelText("Hero Showdown")).toBeInTheDocument();
+    expect(explorer.getByLabelText("Splash Pots")).toBeInTheDocument();
     expect(explorer.getByLabelText("Hero Cards")).toBeInTheDocument();
     expect(explorer.getByLabelText("Date")).toBeInTheDocument();
     expect(explorer.getByLabelText("Sort By")).toBeInTheDocument();
@@ -282,5 +300,47 @@ describe("CoinPokerAnalyzer dashboard", () => {
     await waitFor(() => {
       expect(screen.getByRole("dialog", { name: /Hand .* detail/ })).toBeInTheDocument();
     });
+  });
+
+  it("shows separate splash pot insight cards when huge pots exist", async () => {
+    const fixture = readFileSync(
+      join(process.cwd(), "src/tests/fixtures/coinpoker-v1-representative-hands.txt"),
+      "utf8",
+    );
+    const splashFixture = fixture.replace(
+      "Total pot ₮1.32 | Rake ₮0.07",
+      "Total pot ₮38.15 | Rake ₮0.07",
+    );
+    const file = new File([splashFixture], "coinpoker-v1-representative-hands.txt", {
+      type: "text/plain",
+    });
+    const parsedHands = parseCoinPokerFile(splashFixture);
+    const biggestLosingHand = getBiggestLosingHand(parsedHands);
+    const biggestSplashPotLosingHand = getBiggestSplashPotLosingHand(parsedHands);
+    const { container } = render(<CoinPokerAnalyzer />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as HTMLInputElement, {
+      target: {
+        files: [file],
+      },
+    });
+
+    await screen.findByRole("heading", { name: "Summary Insights" });
+
+    const summaryInsights = within(getSectionForHeading("Summary Insights"));
+
+    expect(biggestLosingHand?.handId).not.toBe("6299122116");
+    expect(biggestSplashPotLosingHand).toMatchObject({
+      handId: "6299122116",
+      potBb: 1907.5,
+      isSplashPot: true,
+    });
+    expect(summaryInsights.getByText("Biggest Splash Pot Lost")).toBeInTheDocument();
+    expect(summaryInsights.getByText("SPLASH POT")).toBeInTheDocument();
+    expect(summaryInsights.getByText("Hand 6299122116")).toBeInTheDocument();
+    expect(summaryInsights.getAllByRole("button", { name: "View" })).toHaveLength(3);
   });
 });

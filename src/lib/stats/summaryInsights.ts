@@ -1,6 +1,7 @@
 import type { HoleCardMatrixCell, HoleCardMatrixResult } from "./holeCardMatrix";
 import { getHoleCardSampleLabel } from "./holeCardMatrix";
 import { pickBestPosition, pickWorstPosition } from "./positionAnalysis";
+import { classifySplashPot, isSplashPot } from "./splashPots";
 import type { PokerHand, PositionStats } from "../../types";
 
 const MIN_STARTING_HAND_INSIGHT_HANDS = 3;
@@ -21,6 +22,9 @@ export interface HandInsight {
   readonly position: PokerHand["heroPosition"];
   readonly heroNet: number;
   readonly potSize: number | null;
+  readonly potBb: number | null;
+  readonly isSplashPotCandidate: boolean;
+  readonly isSplashPot: boolean;
 }
 
 export interface PositionInsight {
@@ -47,6 +51,8 @@ function toStartingHandInsight(cell: HoleCardMatrixCell): StartingHandInsight {
 }
 
 function toHandInsight(hand: PokerHand): HandInsight {
+  const splashPot = classifySplashPot(hand);
+
   return {
     hand,
     handId: hand.handId,
@@ -54,6 +60,9 @@ function toHandInsight(hand: PokerHand): HandInsight {
     position: hand.heroPosition,
     heroNet: hand.heroNetResult,
     potSize: hand.totalPot,
+    potBb: splashPot.potBb,
+    isSplashPotCandidate: splashPot.isSplashPotCandidate,
+    isSplashPot: splashPot.isSplashPot,
   };
 }
 
@@ -115,11 +124,13 @@ export function getMostPlayedStartingHand(
 }
 
 export function getBiggestWinningHand(hands: readonly PokerHand[]): HandInsight | null {
-  if (hands.length === 0) {
+  const normalHands = hands.filter((hand) => !isSplashPot(hand));
+
+  if (normalHands.length === 0) {
     return null;
   }
 
-  const biggest = hands.reduce((best, current) =>
+  const biggest = normalHands.reduce((best, current) =>
     current.heroNetResult > best.heroNetResult ? current : best,
   );
 
@@ -127,11 +138,41 @@ export function getBiggestWinningHand(hands: readonly PokerHand[]): HandInsight 
 }
 
 export function getBiggestLosingHand(hands: readonly PokerHand[]): HandInsight | null {
-  if (hands.length === 0) {
+  const normalHands = hands.filter((hand) => !isSplashPot(hand));
+
+  if (normalHands.length === 0) {
     return null;
   }
 
-  const biggest = hands.reduce((worst, current) =>
+  const biggest = normalHands.reduce((worst, current) =>
+    current.heroNetResult < worst.heroNetResult ? current : worst,
+  );
+
+  return toHandInsight(biggest);
+}
+
+export function getBiggestSplashPotWinningHand(hands: readonly PokerHand[]): HandInsight | null {
+  const winningSplashPots = hands.filter((hand) => isSplashPot(hand) && hand.heroNetResult > 0);
+
+  if (winningSplashPots.length === 0) {
+    return null;
+  }
+
+  const biggest = winningSplashPots.reduce((best, current) =>
+    current.heroNetResult > best.heroNetResult ? current : best,
+  );
+
+  return toHandInsight(biggest);
+}
+
+export function getBiggestSplashPotLosingHand(hands: readonly PokerHand[]): HandInsight | null {
+  const losingSplashPots = hands.filter((hand) => isSplashPot(hand) && hand.heroNetResult < 0);
+
+  if (losingSplashPots.length === 0) {
+    return null;
+  }
+
+  const biggest = losingSplashPots.reduce((worst, current) =>
     current.heroNetResult < worst.heroNetResult ? current : worst,
   );
 

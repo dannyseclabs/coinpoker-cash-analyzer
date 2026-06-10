@@ -16,6 +16,7 @@ const DEFAULT_FILTERS: HandExplorerFilters = {
   position: "All",
   result: "All",
   showdown: "All",
+  splashPots: "All",
   dateRange: "All hands",
   heroCardsSearch: "",
 };
@@ -188,6 +189,30 @@ describe("handExplorer", () => {
         showdown: "No Showdown",
       }).map((hand) => hand.handId),
     ).toEqual(["2", "3"]);
+  });
+
+  it("filters by splash pot status", () => {
+    const splashHand = createHand({
+      handId: "splash",
+      date: "2026/06/09 12:00:00 CEST",
+      heroPosition: "BTN",
+      heroCards: ["Qs", "Qh"],
+      heroNetResult: -2.19,
+      totalPot: 10,
+    });
+
+    expect(
+      filterHands([hands[0], splashHand], {
+        ...DEFAULT_FILTERS,
+        splashPots: "Normal only",
+      }).map((hand) => hand.handId),
+    ).toEqual(["1"]);
+    expect(
+      filterHands([hands[0], splashHand], {
+        ...DEFAULT_FILTERS,
+        splashPots: "Splash only",
+      }).map((hand) => hand.handId),
+    ).toEqual(["splash"]);
   });
 
   it("detects Hero showdown only from Hero cards or Hero show/muck actions", () => {

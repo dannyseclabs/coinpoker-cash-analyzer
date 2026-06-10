@@ -123,11 +123,13 @@ describe("holeCardMatrix", () => {
   });
 
   it("labels tiny starting-hand samples as low confidence", () => {
-    expect(getHoleCardSampleLabel(0)).toBe("Very small sample");
-    expect(getHoleCardSampleLabel(4)).toBe("Very small sample");
-    expect(getHoleCardSampleLabel(5)).toBe("Small Sample");
-    expect(getHoleCardSampleLabel(29)).toBe("Medium Sample");
-    expect(getHoleCardSampleLabel(30)).toBe("Reliable Sample");
+    expect(getHoleCardSampleLabel(0)).toBe("Very Small Sample");
+    expect(getHoleCardSampleLabel(4)).toBe("Very Small Sample");
+    expect(getHoleCardSampleLabel(5)).toBe("Low Confidence");
+    expect(getHoleCardSampleLabel(29)).toBe("Low Confidence");
+    expect(getHoleCardSampleLabel(30)).toBe("Medium Confidence");
+    expect(getHoleCardSampleLabel(99)).toBe("Medium Confidence");
+    expect(getHoleCardSampleLabel(100)).toBe("Reliable Sample");
   });
 
   it("aggregates matrix stats by normalized hand", () => {

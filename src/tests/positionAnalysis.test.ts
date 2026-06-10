@@ -28,11 +28,13 @@ function createPositionStats(
 
 describe("positionAnalysis", () => {
   it("labels position sample sizes", () => {
-    expect(getPositionSampleLabel(0)).toBe("Small sample");
-    expect(getPositionSampleLabel(29)).toBe("Small sample");
-    expect(getPositionSampleLabel(30)).toBe("Medium sample");
-    expect(getPositionSampleLabel(99)).toBe("Medium sample");
-    expect(getPositionSampleLabel(100)).toBe("Reliable sample");
+    expect(getPositionSampleLabel(0)).toBe("Very Small Sample");
+    expect(getPositionSampleLabel(29)).toBe("Very Small Sample");
+    expect(getPositionSampleLabel(30)).toBe("Small Sample");
+    expect(getPositionSampleLabel(99)).toBe("Small Sample");
+    expect(getPositionSampleLabel(100)).toBe("Medium Sample");
+    expect(getPositionSampleLabel(299)).toBe("Medium Sample");
+    expect(getPositionSampleLabel(300)).toBe("Reliable Sample");
   });
 
   it("selects best and worst positions only from positions with at least 30 hands", () => {

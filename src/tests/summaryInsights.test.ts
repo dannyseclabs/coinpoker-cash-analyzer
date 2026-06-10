@@ -4,6 +4,8 @@ import { createHoleCardMatrix } from "../lib/stats/holeCardMatrix";
 import {
   getBestPositionInsight,
   getBiggestLosingHand,
+  getBiggestSplashPotLosingHand,
+  getBiggestSplashPotWinningHand,
   getBiggestWinningHand,
   getMostPlayedStartingHand,
   getMostProfitableStartingHand,
@@ -115,7 +117,7 @@ describe("summaryInsights", () => {
       label: "KQs",
       handsPlayed: 3,
       totalProfit: 1.5,
-      sampleLabel: "Very small sample",
+      sampleLabel: "Very Small Sample",
     });
   });
 
@@ -222,6 +224,87 @@ describe("summaryInsights", () => {
       heroNet: -2.1,
       potSize: 4.2,
       position: "BB",
+    });
+  });
+
+  it("excludes splash pots from normal biggest winning and losing hands", () => {
+    const hands = [
+      createHand({
+        handId: "normal-loss",
+        heroCards: ["Ac", "Ad"],
+        heroNetResult: -0.5,
+        totalPot: 1,
+      }),
+      createHand({
+        handId: "splash-loss",
+        heroCards: ["Js", "2c"],
+        heroNetResult: -2.19,
+        totalPot: 38.15,
+      }),
+      createHand({
+        handId: "normal-win",
+        heroCards: ["Kh", "Kd"],
+        heroNetResult: 0.8,
+        totalPot: 1.6,
+      }),
+      createHand({
+        handId: "splash-win",
+        heroCards: ["Qh", "Qd"],
+        heroNetResult: 5,
+        totalPot: 20,
+      }),
+    ];
+
+    expect(getBiggestLosingHand(hands)).toMatchObject({
+      handId: "normal-loss",
+      heroNet: -0.5,
+      isSplashPot: false,
+    });
+    expect(getBiggestWinningHand(hands)).toMatchObject({
+      handId: "normal-win",
+      heroNet: 0.8,
+      isSplashPot: false,
+    });
+  });
+
+  it("selects separate biggest splash pot wins and losses only when splash hands exist", () => {
+    const normalHands = [
+      createHand({
+        handId: "normal",
+        heroCards: ["Ac", "Ad"],
+        heroNetResult: -0.5,
+        totalPot: 1,
+      }),
+    ];
+    const hands = [
+      ...normalHands,
+      createHand({
+        handId: "splash-loss",
+        heroCards: ["Js", "2c"],
+        heroNetResult: -2.19,
+        totalPot: 38.15,
+      }),
+      createHand({
+        handId: "splash-win",
+        heroCards: ["Qh", "Qd"],
+        heroNetResult: 5,
+        totalPot: 20,
+      }),
+    ];
+
+    expect(getBiggestSplashPotLosingHand(normalHands)).toBeNull();
+    expect(getBiggestSplashPotWinningHand(normalHands)).toBeNull();
+    expect(getBiggestSplashPotLosingHand(hands)).toMatchObject({
+      handId: "splash-loss",
+      heroNet: -2.19,
+      potBb: 1907.5,
+      isSplashPot: true,
+    });
+    expect(getBiggestSplashPotWinningHand(hands)).toMatchObject({
+      handId: "splash-win",
+      heroNet: 5,
+      potBb: 1000,
+      isSplashPot: true,
     });
   });
 
