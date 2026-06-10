@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { AlertTriangle, UploadCloud } from "lucide-react";
 
@@ -33,6 +34,18 @@ import {
   getPositionHighlights,
   getPositionSampleLabel,
 } from "@/src/lib/stats/positionAnalysis";
+import {
+  getBestPositionInsight,
+  getBiggestLosingHand,
+  getBiggestWinningHand,
+  getMostPlayedStartingHand,
+  getMostProfitableStartingHand,
+  getWorstPositionInsight,
+  getWorstStartingHand,
+  type HandInsight,
+  type PositionInsight,
+  type StartingHandInsight,
+} from "@/src/lib/stats/summaryInsights";
 import type { HandAction, LeakResult, PokerHand, PokerStreet, StatisticsResult } from "@/src/types";
 
 interface AnalyzerResult {
@@ -256,6 +269,10 @@ function formatSignedNumber(value: number): string {
 
 function formatSignedCurrency(value: number): string {
   return `${value >= 0 ? "+" : ""}${formatCurrency(value)}`;
+}
+
+function formatHandsCount(value: number): string {
+  return `${formatNumber(value)} ${value === 1 ? "hand" : "hands"}`;
 }
 
 function formatPercent(value: number): string {
@@ -759,6 +776,38 @@ function StatTile({
   );
 }
 
+function SummaryInsightCard({
+  label,
+  mainValue,
+  secondaryContext,
+  metaContext,
+  action,
+}: Readonly<{
+  label: string;
+  mainValue: string;
+  secondaryContext?: string | undefined;
+  metaContext?: string | undefined;
+  action?: ReactNode | undefined;
+}>) {
+  return (
+    <div className={`${CARD_CLASS} flex min-h-36 flex-col justify-between p-4`}>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{label}</p>
+        <p className="mt-3 break-words text-2xl font-semibold tracking-tight text-zinc-950">
+          {mainValue}
+        </p>
+        {secondaryContext === undefined ? null : (
+          <p className="mt-2 text-sm font-medium text-zinc-700">{secondaryContext}</p>
+        )}
+        {metaContext === undefined ? null : (
+          <p className="mt-1 text-xs leading-5 text-zinc-500">{metaContext}</p>
+        )}
+      </div>
+      {action === undefined ? null : <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
 function PositionHighlight({
   label,
   title,
@@ -779,6 +828,32 @@ function PositionHighlight({
       </dd>
     </div>
   );
+}
+
+function formatStartingHandSecondaryContext(insight: StartingHandInsight): string {
+  return `${formatSignedCurrency(insight.totalProfit)} · ${formatHandsCount(insight.handsPlayed)}`;
+}
+
+function formatStartingHandMetaContext(insight: StartingHandInsight): string {
+  return `BB/100 ${formatSignedNumber(insight.bbPer100)} · ${insight.sampleLabel}`;
+}
+
+function formatPositionSecondaryContext(insight: PositionInsight): string {
+  return `${formatSignedNumber(insight.bbPer100)} BB/100 · ${formatHandsCount(
+    insight.handsPlayed,
+  )}`;
+}
+
+function formatPositionMetaContext(insight: PositionInsight): string {
+  return `Profit ${formatSignedCurrency(insight.totalProfit)}`;
+}
+
+function formatHandSecondaryContext(insight: HandInsight): string {
+  return `${formatSignedCurrency(insight.heroNet)} · ${insight.position}`;
+}
+
+function formatHandMetaContext(insight: HandInsight): string {
+  return `Hand ${insight.handId} · Pot ${formatNullableCurrency(insight.potSize)}`;
 }
 
 function HandDetailPanel({
@@ -1022,6 +1097,27 @@ export function CoinPokerAnalyzer() {
     () => (result === null ? null : createHoleCardMatrix(result.hands)),
     [result],
   );
+  const summaryStartingHandInsights = useMemo(() => {
+    if (holeCardMatrix === null) {
+      return null;
+    }
+
+    return {
+      mostProfitable: getMostProfitableStartingHand(holeCardMatrix),
+      worst: getWorstStartingHand(holeCardMatrix),
+      mostPlayed: getMostPlayedStartingHand(holeCardMatrix),
+    };
+  }, [holeCardMatrix]);
+  const summaryHandInsights = useMemo(() => {
+    if (result === null) {
+      return null;
+    }
+
+    return {
+      biggestWinning: getBiggestWinningHand(result.hands),
+      biggestLosing: getBiggestLosingHand(result.hands),
+    };
+  }, [result]);
   const selectedHoleCardCell =
     holeCardMatrix === null || selectedHoleCard === null
       ? null
@@ -1054,6 +1150,16 @@ export function CoinPokerAnalyzer() {
     () => (result === null ? [] : getDisplayPositionStats(result.stats)),
     [result],
   );
+  const summaryPositionInsights = useMemo(() => {
+    if (positionStats.length === 0) {
+      return null;
+    }
+
+    return {
+      best: getBestPositionInsight(positionStats),
+      worst: getWorstPositionInsight(positionStats),
+    };
+  }, [positionStats]);
   const positionHighlights = useMemo(() => {
     if (positionStats.length === 0) {
       return null;
@@ -1230,6 +1336,155 @@ export function CoinPokerAnalyzer() {
                 />
               </dl>
             </section>
+
+            {summaryStartingHandInsights !== null &&
+            summaryHandInsights !== null &&
+            summaryPositionInsights !== null ? (
+              <section className={SECTION_GAP_CLASS}>
+                <SectionHeader
+                  title="Summary Insights"
+                  description="Quick highlights from the imported hand history."
+                />
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <SummaryInsightCard
+                    label="Most Profitable Starting Hand"
+                    mainValue={
+                      summaryStartingHandInsights.mostProfitable?.label ?? "Not enough sample"
+                    }
+                    metaContext={
+                      summaryStartingHandInsights.mostProfitable === null
+                        ? "Need at least 3 hands"
+                        : formatStartingHandMetaContext(summaryStartingHandInsights.mostProfitable)
+                    }
+                    secondaryContext={
+                      summaryStartingHandInsights.mostProfitable === null
+                        ? undefined
+                        : formatStartingHandSecondaryContext(
+                            summaryStartingHandInsights.mostProfitable,
+                          )
+                    }
+                  />
+                  <SummaryInsightCard
+                    label="Worst Starting Hand"
+                    mainValue={summaryStartingHandInsights.worst?.label ?? "Not enough sample"}
+                    metaContext={
+                      summaryStartingHandInsights.worst === null
+                        ? "Need at least 3 hands"
+                        : formatStartingHandMetaContext(summaryStartingHandInsights.worst)
+                    }
+                    secondaryContext={
+                      summaryStartingHandInsights.worst === null
+                        ? undefined
+                        : formatStartingHandSecondaryContext(summaryStartingHandInsights.worst)
+                    }
+                  />
+                  <SummaryInsightCard
+                    label="Most Played Starting Hand"
+                    mainValue={summaryStartingHandInsights.mostPlayed?.label ?? "Not enough sample"}
+                    metaContext={
+                      summaryStartingHandInsights.mostPlayed === null
+                        ? "Upload hands with Hero hole cards"
+                        : formatStartingHandMetaContext(summaryStartingHandInsights.mostPlayed)
+                    }
+                    secondaryContext={
+                      summaryStartingHandInsights.mostPlayed === null
+                        ? undefined
+                        : formatStartingHandSecondaryContext(summaryStartingHandInsights.mostPlayed)
+                    }
+                  />
+                  <SummaryInsightCard
+                    action={
+                      summaryHandInsights.biggestWinning === null ? undefined : (
+                        <button
+                          className={SMALL_BUTTON_CLASS}
+                          type="button"
+                          onClick={() =>
+                            setSelectedHand(summaryHandInsights.biggestWinning?.hand ?? null)
+                          }
+                        >
+                          View
+                        </button>
+                      )
+                    }
+                    label="Biggest Winning Hand"
+                    mainValue={
+                      summaryHandInsights.biggestWinning === null
+                        ? "Not enough sample"
+                        : formatCards(summaryHandInsights.biggestWinning.heroCards)
+                    }
+                    metaContext={
+                      summaryHandInsights.biggestWinning === null
+                        ? undefined
+                        : formatHandMetaContext(summaryHandInsights.biggestWinning)
+                    }
+                    secondaryContext={
+                      summaryHandInsights.biggestWinning === null
+                        ? undefined
+                        : formatHandSecondaryContext(summaryHandInsights.biggestWinning)
+                    }
+                  />
+                  <SummaryInsightCard
+                    action={
+                      summaryHandInsights.biggestLosing === null ? undefined : (
+                        <button
+                          className={SMALL_BUTTON_CLASS}
+                          type="button"
+                          onClick={() =>
+                            setSelectedHand(summaryHandInsights.biggestLosing?.hand ?? null)
+                          }
+                        >
+                          View
+                        </button>
+                      )
+                    }
+                    label="Biggest Losing Hand"
+                    mainValue={
+                      summaryHandInsights.biggestLosing === null
+                        ? "Not enough sample"
+                        : formatCards(summaryHandInsights.biggestLosing.heroCards)
+                    }
+                    metaContext={
+                      summaryHandInsights.biggestLosing === null
+                        ? undefined
+                        : formatHandMetaContext(summaryHandInsights.biggestLosing)
+                    }
+                    secondaryContext={
+                      summaryHandInsights.biggestLosing === null
+                        ? undefined
+                        : formatHandSecondaryContext(summaryHandInsights.biggestLosing)
+                    }
+                  />
+                  <SummaryInsightCard
+                    label="Best Position"
+                    mainValue={summaryPositionInsights.best?.position ?? "Not enough sample"}
+                    metaContext={
+                      summaryPositionInsights.best === null
+                        ? "Need at least 30 hands"
+                        : formatPositionMetaContext(summaryPositionInsights.best)
+                    }
+                    secondaryContext={
+                      summaryPositionInsights.best === null
+                        ? undefined
+                        : formatPositionSecondaryContext(summaryPositionInsights.best)
+                    }
+                  />
+                  <SummaryInsightCard
+                    label="Worst Position"
+                    mainValue={summaryPositionInsights.worst?.position ?? "Not enough sample"}
+                    metaContext={
+                      summaryPositionInsights.worst === null
+                        ? "Need at least 30 hands"
+                        : formatPositionMetaContext(summaryPositionInsights.worst)
+                    }
+                    secondaryContext={
+                      summaryPositionInsights.worst === null
+                        ? undefined
+                        : formatPositionSecondaryContext(summaryPositionInsights.worst)
+                    }
+                  />
+                </div>
+              </section>
+            ) : null}
 
             {positionHighlights !== null ? (
               <section className={SECTION_GAP_CLASS}>

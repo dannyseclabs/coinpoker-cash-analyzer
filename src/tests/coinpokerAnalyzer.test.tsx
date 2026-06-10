@@ -60,6 +60,43 @@ describe("CoinPokerAnalyzer dashboard", () => {
     ).toBeInTheDocument();
     expect(summary.getByText("Very Loose")).toBeInTheDocument();
 
+    const summaryHeading = screen.getByRole("heading", { name: "Summary" });
+    const summaryInsightsHeading = screen.getByRole("heading", { name: "Summary Insights" });
+    const positionHeading = screen.getByRole("heading", { name: "Position Analysis" });
+
+    expect(
+      summaryHeading.compareDocumentPosition(summaryInsightsHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      summaryInsightsHeading.compareDocumentPosition(positionHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const summaryInsights = within(getSectionForHeading("Summary Insights"));
+
+    expect(
+      summaryInsights.getByText("Quick highlights from the imported hand history."),
+    ).toBeInTheDocument();
+    expect(summaryInsights.getByText("Most Profitable Starting Hand")).toBeInTheDocument();
+    expect(summaryInsights.getByText("Worst Starting Hand")).toBeInTheDocument();
+    expect(summaryInsights.getByText("Most Played Starting Hand")).toBeInTheDocument();
+    expect(summaryInsights.getByText("Biggest Winning Hand")).toBeInTheDocument();
+    expect(summaryInsights.getByText("Biggest Losing Hand")).toBeInTheDocument();
+    expect(summaryInsights.getAllByRole("button", { name: "View" })).toHaveLength(2);
+
+    fireEvent.click(summaryInsights.getAllByRole("button", { name: "View" })[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /Hand .* detail/ })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Hand .* detail/ })).not.toBeInTheDocument();
+    });
+
     const leaksHeading = screen.getByRole("heading", { name: "Leaks" });
     const explorerHeading = screen.getByRole("heading", { name: "Hand Explorer" });
 
