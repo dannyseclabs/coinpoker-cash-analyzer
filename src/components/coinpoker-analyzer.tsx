@@ -58,7 +58,15 @@ import {
   type StartingHandInsight,
 } from "@/src/lib/stats/summaryInsights";
 import { classifySplashPot } from "@/src/lib/stats/splashPots";
-import type { HandAction, LeakResult, PokerHand, PokerStreet, StatisticsResult } from "@/src/types";
+import type {
+  HandAction,
+  LeakResult,
+  Player,
+  PokerHand,
+  PokerPosition,
+  PokerStreet,
+  StatisticsResult,
+} from "@/src/types";
 
 interface AnalyzerResult {
   readonly fileName: string;
@@ -70,6 +78,11 @@ interface AnalyzerResult {
 interface SelectedHoleCardOccurrenceRow {
   readonly occurrence: HoleCardOccurrence;
   readonly hand: PokerHand | null;
+}
+
+interface PlayerDisplayLabel {
+  readonly primary: string;
+  readonly secondary: string | null;
 }
 
 type HoleCardMatrixMetric = "bbPer100" | "totalProfit" | "handsPlayed" | "vpipFrequency";
@@ -410,13 +423,109 @@ function formatActionType(type: HandAction["type"]): string {
   return type.replaceAll("_", " ");
 }
 
-function formatActionDetail(action: HandAction): string {
-  const details = [
-    action.amount === null ? null : `Amount ${formatCurrency(action.amount)}`,
-    action.raiseTo === null ? null : `Raise to ${formatCurrency(action.raiseTo)}`,
-  ].filter((value): value is string => value !== null);
+function formatPlayerPositionSuffix(position: PokerPosition): string {
+  return position === "UNKNOWN" ? "" : ` (${position})`;
+}
 
-  return details.length === 0 ? "-" : details.join(" | ");
+function formatKnownPlayerLabel(player: Player, villainNumber: number | null): PlayerDisplayLabel {
+  if (player.isHero) {
+    return {
+      primary: `Hero${formatPlayerPositionSuffix(player.position)}`,
+      secondary: null,
+    };
+  }
+
+  const primaryLabel = `Villain ${villainNumber ?? 1}${formatPlayerPositionSuffix(
+    player.position,
+  )}`;
+
+  return {
+    primary: primaryLabel,
+    secondary: player.name,
+  };
+}
+
+function collectPlayerNames(hand: PokerHand): string[] {
+  return [
+    ...hand.actions.map((action) => action.playerName),
+    ...(hand.showdown?.entries.map((entry) => entry.playerName) ?? []),
+    ...(hand.showdown?.winnerNames ?? []),
+  ];
+}
+
+function createPlayerDisplayLabels(hand: PokerHand): ReadonlyMap<string, PlayerDisplayLabel> {
+  const labels = new Map<string, PlayerDisplayLabel>();
+  const sortedPlayers = [...hand.players].sort((left, right) => left.seat - right.seat);
+  let nextVillainNumber = 1;
+
+  sortedPlayers.forEach((player) => {
+    const villainNumber = player.isHero ? null : nextVillainNumber;
+
+    labels.set(player.name, formatKnownPlayerLabel(player, villainNumber));
+
+    if (!player.isHero) {
+      nextVillainNumber += 1;
+    }
+  });
+
+  if (!labels.has(hand.heroName)) {
+    labels.set(hand.heroName, {
+      primary: `Hero${formatPlayerPositionSuffix(hand.heroPosition)}`,
+      secondary: null,
+    });
+  }
+
+  collectPlayerNames(hand).forEach((playerName) => {
+    if (labels.has(playerName)) {
+      return;
+    }
+
+    if (playerName === hand.heroName) {
+      labels.set(playerName, {
+        primary: `Hero${formatPlayerPositionSuffix(hand.heroPosition)}`,
+        secondary: null,
+      });
+      return;
+    }
+
+    labels.set(playerName, {
+      primary: `Villain ${nextVillainNumber}`,
+      secondary: playerName,
+    });
+    nextVillainNumber += 1;
+  });
+
+  return labels;
+}
+
+function getPlayerDisplayLabel(
+  playerLabels: ReadonlyMap<string, PlayerDisplayLabel>,
+  playerName: string,
+): PlayerDisplayLabel {
+  return (
+    playerLabels.get(playerName) ?? {
+      primary: playerName,
+      secondary: null,
+    }
+  );
+}
+
+function formatTimelineAmount(amount: number, bigBlind: number): string {
+  const formatted = formatPokerResult(amount, bigBlind, { signed: false });
+
+  return `${formatted.bbLabel} ${formatted.currencyLabel}`;
+}
+
+function formatActionDetail(action: HandAction, bigBlind: number): string {
+  if (action.raiseTo !== null) {
+    return `Raise to ${formatTimelineAmount(action.raiseTo, bigBlind)}`;
+  }
+
+  if (action.amount !== null) {
+    return formatTimelineAmount(action.amount, bigBlind);
+  }
+
+  return "-";
 }
 
 function getShowdownResult(hand: PokerHand, playerName: string, wonAmount: number): string {
@@ -1303,6 +1412,7 @@ function HandDetailPanel({
   const heroNet = formatPokerResult(hand.heroNetResult, hand.stakes.bigBlind);
   const totalPot = formatNullablePokerResult(hand.totalPot, hand.stakes.bigBlind);
   const splashPot = classifySplashPot(hand);
+  const playerLabels = createPlayerDisplayLabels(hand);
 
   return (
     <div
@@ -1424,12 +1534,18 @@ function HandDetailPanel({
                     const stack = formatPokerResult(player.startingStack, hand.stakes.bigBlind, {
                       signed: false,
                     });
+                    const playerLabel = getPlayerDisplayLabel(playerLabels, player.name);
 
                     return (
                       <tr key={player.seat} className="odd:bg-white even:bg-zinc-50/80">
                         <td className={TABLE_CELL_CLASS}>{player.seat}</td>
                         <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
-                          {player.name}
+                          <span className="block">{playerLabel.primary}</span>
+                          {playerLabel.secondary === null ? null : (
+                            <span className="block font-mono text-xs font-normal text-zinc-500">
+                              {playerLabel.secondary}
+                            </span>
+                          )}
                         </td>
                         <td className={TABLE_NUMERIC_CELL_CLASS}>
                           <span className="block font-semibold text-zinc-950">{stack.bbLabel}</span>
@@ -1493,12 +1609,14 @@ function HandDetailPanel({
                           className="odd:bg-white even:bg-zinc-50/80"
                         >
                           <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
-                            {action.playerName}
+                            {getPlayerDisplayLabel(playerLabels, action.playerName).primary}
                           </td>
                           <td className={`${TABLE_CELL_CLASS} capitalize`}>
                             {formatActionType(action.type)}
                           </td>
-                          <td className={TABLE_CELL_CLASS}>{formatActionDetail(action)}</td>
+                          <td className={TABLE_CELL_CLASS}>
+                            {formatActionDetail(action, hand.stakes.bigBlind)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1534,7 +1652,7 @@ function HandDetailPanel({
                       return (
                         <tr key={entry.playerName} className="odd:bg-white even:bg-zinc-50/80">
                           <td className={`${TABLE_CELL_CLASS} font-medium text-zinc-950`}>
-                            {entry.playerName}
+                            {getPlayerDisplayLabel(playerLabels, entry.playerName).primary}
                           </td>
                           <td className={`${TABLE_CELL_CLASS} font-mono`}>
                             {formatCards(entry.cards)}

@@ -28,6 +28,17 @@ function getSectionForHeading(name: string): HTMLElement {
   return section;
 }
 
+function getSectionForHeadingWithin(container: HTMLElement, name: string): HTMLElement {
+  const heading = within(container).getByRole("heading", { name });
+  const section = heading.closest("section");
+
+  if (section === null) {
+    throw new Error(`Expected ${name} heading to be inside a section.`);
+  }
+
+  return section;
+}
+
 function formatSignedBB(amount: number, bigBlind: number): string {
   return formatBBAmount(amount, bigBlind, { signed: true });
 }
@@ -49,7 +60,100 @@ function formatPotContext(insight: HandInsight): string {
   }`;
 }
 
+const handDetailDrawerFixture = `CoinPoker Hand #1111111111: NLH (₮0.01/₮0.02) 2026/06/07 21:00:00 CEST
+Table 'drawer-test' 6-max Seat #3 is the button
+Seat 1: utg11111 (₮2 in chips)
+Seat 2: Hero (₮2 in chips)
+Seat 3: btn33333 (₮2 in chips)
+Seat 4: sb444444 (₮2 in chips)
+Seat 5: bb555555 (₮2 in chips)
+sb444444: posts small blind ₮0.01
+bb555555: posts big blind ₮0.02
+*** HOLE CARDS ***
+Dealt to utg11111
+Dealt to Hero [Ah Kh]
+Dealt to btn33333
+Dealt to sb444444
+Dealt to bb555555
+utg11111: raises ₮0.04 to ₮0.06
+Hero: calls ₮0.06
+btn33333: folds
+sb444444: folds
+bb555555: calls ₮0.04
+*** FLOP *** [As 7d 2c]
+bb555555: checks
+utg11111: bets ₮0.12
+Hero: raises ₮0.18 to ₮0.30
+bb555555: folds
+utg11111: calls ₮0.18
+*** TURN *** [As 7d 2c] [9h]
+utg11111: checks
+Hero: ALLIN ₮1.84
+utg11111: folds
+Hero: RETURN ₮1.84
+*** SHOWDOWN ***
+Hero collected ₮0.70 from pot
+*** SUMMARY ***
+Total pot ₮0.72 | Rake ₮0.02
+Hand was run once
+Board [ As 7d 2c 9h ]
+Game ended: 2026/06/07 21:01:00 CEST
+Seat 1: utg11111 folded on the Turn
+Seat 2: Hero showed [Ah Kh] and won (₮0.70) with One Pair
+Seat 3: btn33333 folded before Flop (didn't bet)
+Seat 4: sb444444 folded before Flop (didn't bet)
+Seat 5: bb555555 folded on the Flop`;
+
 describe("CoinPokerAnalyzer dashboard", () => {
+  it("shows hand detail player labels and action amounts in BB-first format", async () => {
+    const file = new File([handDetailDrawerFixture], "drawer-test.txt", {
+      type: "text/plain",
+    });
+    const { container } = render(<CoinPokerAnalyzer />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as HTMLInputElement, {
+      target: {
+        files: [file],
+      },
+    });
+
+    await screen.findByRole("heading", { name: "Hand Explorer" });
+
+    const explorer = within(getSectionForHeading("Hand Explorer"));
+
+    fireEvent.click(explorer.getByRole("button", { name: "View" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Hand 1111111111 detail",
+    });
+    const players = within(getSectionForHeadingWithin(dialog, "Players"));
+    const timelineSection = getSectionForHeadingWithin(dialog, "Action Timeline");
+    const timeline = within(timelineSection);
+    const timelineRows = timeline.getAllByRole("row");
+    const rowTexts = timelineRows.map((row) => row.textContent ?? "");
+
+    expect(players.getByText("Hero (CO)")).toBeInTheDocument();
+    expect(players.getByText("Villain 1 (UTG)")).toBeInTheDocument();
+    expect(players.getByText("Villain 2 (BTN)")).toBeInTheDocument();
+    expect(players.getByText("Villain 3 (SB)")).toBeInTheDocument();
+    expect(players.getByText("Villain 4 (BB)")).toBeInTheDocument();
+    expect(players.getByText("utg11111")).toBeInTheDocument();
+
+    expect(timeline.queryByText("utg11111")).not.toBeInTheDocument();
+    expect(rowTexts.filter((text) => text.includes("Villain 1 (UTG)"))).toHaveLength(5);
+    expect(rowTexts.some((text) => text.includes("Hero (CO)") && text.includes("call"))).toBe(true);
+    expect(rowTexts.some((text) => text.includes("Villain 2 (BTN)") && text.includes("fold"))).toBe(
+      true,
+    );
+    expect(timeline.getByText("0.5 BB ₮0.01")).toBeInTheDocument();
+    expect(timeline.getByText("Raise to 15 BB ₮0.3")).toBeInTheDocument();
+    expect(timeline.getAllByText("92 BB ₮1.84")).toHaveLength(2);
+    expect(within(dialog).getByText("Raw Hand History")).toBeInTheDocument();
+  });
+
   it("renders the full hand explorer below leaks after upload", async () => {
     const fixture = readFileSync(
       join(process.cwd(), "src/tests/fixtures/coinpoker-v1-representative-hands.txt"),
