@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, UploadCloud } from "lucide-react";
 
 import {
@@ -29,6 +29,19 @@ import {
 } from "@/src/lib/formatPoker";
 import { detectLeaks } from "@/src/lib/leaks/detectLeaks";
 import { parseCoinPokerFile } from "@/src/lib/parser/parseCoinPokerFile";
+import {
+  generateQuizQuestions,
+  getVisibleQuizInformation,
+  scoreQuizAnswers,
+  type QuizQuestion,
+  type QuizTypeFilter,
+} from "@/src/lib/quizGenerator";
+import {
+  getSessionInsights,
+  type SessionInsightClassification,
+  type SessionInsightResult,
+  type SessionScorecardRow,
+} from "@/src/lib/sessionInsights";
 import { detectPokerSessions, type PokerSession } from "@/src/lib/sessions";
 import { calculateStats } from "@/src/lib/stats/calculateStats";
 import {
@@ -186,6 +199,22 @@ const HAND_EXPLORER_SORT_DIRECTION_OPTIONS: readonly {
   { label: "↑ Ascending", value: "asc" },
 ];
 const HAND_EXPLORER_PAGE_SIZE_OPTIONS: readonly HandExplorerPageSize[] = [25, 50, 100];
+const QUIZ_TYPE_FILTER_OPTIONS: readonly QuizTypeFilter[] = [
+  "All",
+  "Preflop Discipline",
+  "Value Extraction",
+  "River Discipline",
+  "Blind Defense",
+  "Review Spots",
+];
+const QUIZ_SPOT_TYPE_LABELS: Readonly<Record<QuizQuestion["spotType"], string>> = {
+  "preflop-decision": "Preflop Decision",
+  "blind-defense": "Blind Defense",
+  "river-discipline": "River Discipline",
+  "value-bet": "Value Bet",
+  "big-loss-review": "Big Loss Review",
+  "showdown-review": "Showdown Review",
+};
 const STREET_LABELS: Readonly<Record<PokerStreet, string>> = {
   preflop: "Preflop",
   flop: "Flop",
@@ -272,18 +301,21 @@ const SUMMARY_EXPLANATIONS: Readonly<Record<SummaryMetricLabel, SummaryExplanati
   },
 };
 
-const SECTION_GAP_CLASS = "flex flex-col gap-4";
-const CARD_CLASS =
-  "rounded-2xl border border-zinc-200/80 bg-white shadow-sm shadow-zinc-200/60 transition duration-200 hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md hover:shadow-zinc-200/70";
+const SECTION_GAP_CLASS = "flex flex-col gap-3";
+const CARD_CLASS = "rounded-xl border border-zinc-200/80 bg-white shadow-sm shadow-zinc-200/50";
 const TABLE_CONTAINER_CLASS =
   "overflow-x-auto rounded-xl border border-zinc-200/80 bg-white shadow-sm shadow-zinc-200/50";
 const TABLE_CLASS = "w-full border-collapse text-left text-sm";
 const TABLE_HEAD_CLASS =
   "sticky top-0 z-10 border-b border-zinc-200 bg-zinc-100/90 text-[11px] font-semibold uppercase tracking-wide text-zinc-600 backdrop-blur";
-const TABLE_HEADER_CELL_CLASS = "px-4 py-3 whitespace-nowrap";
-const TABLE_CELL_CLASS = "border-b border-zinc-100 px-4 py-3 align-middle text-zinc-700";
+const TABLE_HEADER_CELL_CLASS = "px-3 py-2 whitespace-nowrap";
+const TABLE_CELL_CLASS = "border-b border-zinc-100 px-3 py-2 align-middle text-zinc-700";
 const TABLE_NUMERIC_CELL_CLASS =
-  "border-b border-zinc-100 px-4 py-3 text-right align-middle font-mono text-[13px] tabular-nums text-zinc-800";
+  "border-b border-zinc-100 px-3 py-2 text-right align-middle font-mono text-[13px] tabular-nums text-zinc-800";
+const PROFIT_VALUE_CLASS =
+  "inline-grid min-w-[6.25rem] grid-cols-1 gap-0.5 font-mono leading-tight tabular-nums";
+const PROFIT_PRIMARY_CLASS = "block w-full text-sm font-semibold tabular-nums";
+const PROFIT_SECONDARY_CLASS = "block w-full text-xs font-medium tabular-nums text-zinc-500";
 const CONTROL_CLASS =
   "h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-950 shadow-sm transition focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-950/10 disabled:cursor-not-allowed disabled:opacity-50";
 const BUTTON_CLASS =
@@ -373,6 +405,46 @@ function formatSessionDate(value: Date): string {
 
 function formatSessionDateRange(session: PokerSession): string {
   return `${formatSessionDate(session.startTime)} → ${formatSessionDate(session.endTime)}`;
+}
+
+function ProfitValue({
+  primary,
+  secondary,
+  toneClass = "text-zinc-950",
+  size = "base",
+  align = "right",
+}: Readonly<{
+  primary: string;
+  secondary: string;
+  toneClass?: string;
+  size?: "base" | "large";
+  align?: "left" | "right";
+}>) {
+  const alignClass = align === "right" ? "justify-items-end text-right" : "justify-items-start";
+  const sizeClass = size === "large" ? "text-xl" : "";
+
+  return (
+    <span className={`${PROFIT_VALUE_CLASS} ${alignClass}`}>
+      <span className={`${PROFIT_PRIMARY_CLASS} ${sizeClass} ${toneClass}`}>{primary}</span>
+      <span className={PROFIT_SECONDARY_CLASS}>{secondary}</span>
+    </span>
+  );
+}
+
+function BigBlindCurrencyValue({
+  bbLabel,
+  currencyLabel,
+  toneClass = "text-zinc-950",
+  align = "right",
+}: Readonly<{
+  bbLabel: string;
+  currencyLabel: string;
+  toneClass?: string;
+  align?: "left" | "right";
+}>) {
+  return (
+    <ProfitValue align={align} primary={bbLabel} secondary={currencyLabel} toneClass={toneClass} />
+  );
 }
 
 function getPokerResultTextClass(sign: ReturnType<typeof formatPokerResult>["sign"]): string {
@@ -995,9 +1067,9 @@ function SectionHeader({
 }>) {
   return (
     <div className="flex flex-col gap-1">
-      <h2 className="text-lg font-semibold tracking-tight text-zinc-950 sm:text-xl">{title}</h2>
+      <h2 className="text-base font-semibold tracking-tight text-zinc-950 sm:text-lg">{title}</h2>
       {description === undefined ? null : (
-        <p className="max-w-3xl text-sm leading-6 text-zinc-600">{description}</p>
+        <p className="max-w-3xl text-sm leading-5 text-zinc-600">{description}</p>
       )}
     </div>
   );
@@ -1017,12 +1089,12 @@ function StatTile({
   status?: MetricStatus;
 }>) {
   return (
-    <div className={`${CARD_CLASS} p-4`}>
-      <dt className="flex items-start justify-between gap-3 text-xs font-medium uppercase tracking-wide text-zinc-500">
+    <div className={`${CARD_CLASS} p-3`}>
+      <dt className="flex items-start justify-between gap-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
         <span>{label}</span>
         {status === undefined ? null : (
           <span
-            className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${getStatusToneClass(
+            className={`rounded-md border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${getStatusToneClass(
               status.tone,
             )}`}
             title={status.tooltip}
@@ -1031,21 +1103,21 @@ function StatTile({
           </span>
         )}
       </dt>
-      <dd className="mt-3 text-3xl font-semibold tracking-tight text-zinc-950 tabular-nums">
+      <dd className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950 tabular-nums">
         {value}
       </dd>
       {secondaryValue === undefined ? null : (
-        <p className="mt-1 font-mono text-sm font-medium tabular-nums text-zinc-500">
+        <p className="mt-0.5 font-mono text-xs font-medium tabular-nums text-zinc-500">
           {secondaryValue}
         </p>
       )}
       {explanation === undefined ? null : (
-        <details className="group mt-4 rounded-lg border border-zinc-100 bg-zinc-50/80 text-xs text-zinc-600 open:border-zinc-200 open:bg-white">
+        <details className="group mt-3 rounded-lg border border-zinc-100 bg-zinc-50/80 text-xs text-zinc-600 open:border-zinc-200 open:bg-white">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-medium text-zinc-700 transition hover:text-zinc-950 group-open:border-b group-open:border-zinc-100 [&::-webkit-details-marker]:hidden">
             <span>What this means</span>
             <span className="text-zinc-400 transition group-open:rotate-90">›</span>
           </summary>
-          <div className="space-y-2 px-3 py-3 leading-5">
+          <div className="space-y-1.5 px-3 py-2.5 leading-5">
             <p className="font-semibold text-zinc-900">{explanation.fullName}</p>
             <p className="text-zinc-600">{explanation.explanation}</p>
             <p className="text-zinc-700">{explanation.interpretation}</p>
@@ -1072,21 +1144,21 @@ function SummaryInsightCard({
   action?: ReactNode | undefined;
 }>) {
   return (
-    <div className={`${CARD_CLASS} flex min-h-36 flex-col justify-between p-4`}>
+    <div className={`${CARD_CLASS} flex min-h-28 flex-col justify-between p-3`}>
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{label}</p>
-        <p className="mt-3 break-words text-2xl font-semibold tracking-tight text-zinc-950">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{label}</p>
+        <p className="mt-2 break-words text-xl font-semibold tracking-tight text-zinc-950">
           {mainValue}
         </p>
-        {highlight === undefined ? null : <div className="mt-3">{highlight}</div>}
+        {highlight === undefined ? null : <div className="mt-2">{highlight}</div>}
         {secondaryContext === undefined ? null : (
-          <p className="mt-2 text-sm font-medium text-zinc-700">{secondaryContext}</p>
+          <p className="mt-1.5 text-sm font-medium text-zinc-700">{secondaryContext}</p>
         )}
         {metaContext === undefined ? null : (
-          <p className="mt-1 text-xs leading-5 text-zinc-500">{metaContext}</p>
+          <p className="mt-0.5 text-xs leading-5 text-zinc-500">{metaContext}</p>
         )}
       </div>
-      {action === undefined ? null : <div className="mt-4">{action}</div>}
+      {action === undefined ? null : <div className="mt-3">{action}</div>}
     </div>
   );
 }
@@ -1101,12 +1173,12 @@ function PositionHighlight({
   value: string | undefined;
 }>) {
   return (
-    <div className={`${CARD_CLASS} p-4`}>
-      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
-      <dd className="mt-2 flex items-baseline gap-3">
-        <span className="text-2xl font-semibold tracking-tight text-zinc-950">{title}</span>
+    <div className={`${CARD_CLASS} p-3`}>
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dd className="mt-1.5 flex items-baseline gap-2">
+        <span className="text-xl font-semibold tracking-tight text-zinc-950">{title}</span>
         {value === undefined ? null : (
-          <span className="font-mono text-sm font-medium tabular-nums text-zinc-600">{value}</span>
+          <span className="font-mono text-xs font-medium tabular-nums text-zinc-600">{value}</span>
         )}
       </dd>
     </div>
@@ -1121,25 +1193,21 @@ function PositionResultHighlight({
   stats: PositionInsight | null;
 }>) {
   return (
-    <div className={`${CARD_CLASS} p-4`}>
-      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
-      <dd className="mt-2 flex flex-col gap-2">
-        <span className="text-2xl font-semibold tracking-tight text-zinc-950">
+    <div className={`${CARD_CLASS} p-3`}>
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dd className="mt-1.5 flex flex-col gap-1.5">
+        <span className="text-xl font-semibold tracking-tight text-zinc-950">
           {stats?.position ?? "Not enough sample"}
         </span>
         {stats === null ? null : (
           <>
-            <span
-              className={`font-mono text-xl font-semibold tabular-nums ${getBigBlindCountTextClass(
-                stats.totalBigBlindsWon,
-              )}`}
-            >
-              {formatSignedBigBlindCount(stats.totalBigBlindsWon)}
-            </span>
-            <span className="font-mono text-sm font-medium tabular-nums text-zinc-600">
-              {formatCurrency(stats.totalProfit)}
-            </span>
-            <span className="mt-1 font-mono text-sm font-medium tabular-nums text-zinc-600">
+            <ProfitValue
+              align="left"
+              primary={formatSignedBigBlindCount(stats.totalBigBlindsWon)}
+              secondary={formatCurrency(stats.totalProfit)}
+              toneClass={getBigBlindCountTextClass(stats.totalBigBlindsWon)}
+            />
+            <span className="font-mono text-xs font-medium tabular-nums text-zinc-600">
               {formatNumber(stats.bbPer100)} BB/100
             </span>
             <span className="text-xs font-medium text-zinc-500">
@@ -1187,16 +1255,12 @@ function SummaryStartingHandInsightHighlight({
   insight,
 }: Readonly<{ insight: StartingHandInsight }>) {
   return (
-    <div className="space-y-1">
-      <p
-        className={`font-mono text-lg font-semibold tabular-nums ${getBigBlindCountTextClass(
-          insight.totalBigBlindsWon,
-        )}`}
-      >
-        {formatSignedBigBlindCount(insight.totalBigBlindsWon)}
-      </p>
-      <p className="text-sm font-medium text-zinc-700">{formatCurrency(insight.totalProfit)}</p>
-    </div>
+    <ProfitValue
+      align="left"
+      primary={formatSignedBigBlindCount(insight.totalBigBlindsWon)}
+      secondary={formatCurrency(insight.totalProfit)}
+      toneClass={getBigBlindCountTextClass(insight.totalBigBlindsWon)}
+    />
   );
 }
 
@@ -1204,16 +1268,12 @@ function SummaryMostPlayedStartingHandInsightHighlight({
   insight,
 }: Readonly<{ insight: StartingHandInsight }>) {
   return (
-    <div className="space-y-1">
-      <p
-        className={`font-mono text-lg font-semibold tabular-nums ${getBigBlindCountTextClass(
-          insight.totalBigBlindsWon,
-        )}`}
-      >
-        {formatSignedBigBlindCount(insight.totalBigBlindsWon)}
-      </p>
-      <p className="text-sm font-medium text-zinc-700">{formatCurrency(insight.totalProfit)}</p>
-    </div>
+    <ProfitValue
+      align="left"
+      primary={formatSignedBigBlindCount(insight.totalBigBlindsWon)}
+      secondary={formatCurrency(insight.totalProfit)}
+      toneClass={getBigBlindCountTextClass(insight.totalBigBlindsWon)}
+    />
   );
 }
 
@@ -1222,12 +1282,13 @@ function SummaryHandInsightHighlight({ insight }: Readonly<{ insight: HandInsigh
 
   return (
     <div className="space-y-1">
-      <p className="font-mono text-lg font-semibold tabular-nums text-zinc-950">
-        <span className={getPokerResultTextClass(heroNet.sign)}>{heroNet.bbLabel}</span>
-      </p>
-      <p className="text-sm font-medium text-zinc-700">
-        {heroNet.currencyLabel} · {insight.position}
-      </p>
+      <BigBlindCurrencyValue
+        align="left"
+        bbLabel={heroNet.bbLabel}
+        currencyLabel={heroNet.currencyLabel}
+        toneClass={getPokerResultTextClass(heroNet.sign)}
+      />
+      <p className="text-sm font-medium text-zinc-700">{insight.position}</p>
       <p className="text-xs leading-5 text-zinc-500">{formatHandMetaContext(insight)}</p>
       {insight.isSplashPot ? (
         <p className="w-fit rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">
@@ -1247,18 +1308,12 @@ function SessionProfitDisplay({
   size?: "base" | "large";
 }>) {
   return (
-    <span className="flex flex-col items-start gap-0.5">
-      <span
-        className={`font-mono font-semibold tabular-nums ${size === "large" ? "text-2xl" : "text-sm"} ${getBigBlindCountTextClass(
-          session.profitBb,
-        )}`}
-      >
-        {formatSignedBigBlindCount(session.profitBb)}
-      </span>
-      <span className="font-mono text-xs font-medium tabular-nums text-zinc-500">
-        {formatCurrency(session.profitAmount)}
-      </span>
-    </span>
+    <ProfitValue
+      primary={formatSignedBigBlindCount(session.profitBb)}
+      secondary={formatCurrency(session.profitAmount)}
+      size={size}
+      toneClass={getBigBlindCountTextClass(session.profitBb)}
+    />
   );
 }
 
@@ -1314,21 +1369,39 @@ function SessionsSection({
         title="Sessions"
         description="Detected from hand timestamps using a 30-minute inactivity gap."
       />
-      <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <StatTile label="Total Sessions" value={formatSessionsCount(sessions.length)} />
         <StatTile
           label="Best Session"
-          secondaryValue={
-            bestSession === null ? undefined : formatCurrency(bestSession.profitAmount)
+          value={
+            bestSession === null ? (
+              "-"
+            ) : (
+              <ProfitValue
+                align="left"
+                primary={formatSignedBigBlindCount(bestSession.profitBb)}
+                secondary={formatCurrency(bestSession.profitAmount)}
+                size="large"
+                toneClass={getBigBlindCountTextClass(bestSession.profitBb)}
+              />
+            )
           }
-          value={bestSession === null ? "-" : formatSignedBigBlindCount(bestSession.profitBb)}
         />
         <StatTile
           label="Worst Session"
-          secondaryValue={
-            worstSession === null ? undefined : formatCurrency(worstSession.profitAmount)
+          value={
+            worstSession === null ? (
+              "-"
+            ) : (
+              <ProfitValue
+                align="left"
+                primary={formatSignedBigBlindCount(worstSession.profitBb)}
+                secondary={formatCurrency(worstSession.profitAmount)}
+                size="large"
+                toneClass={getBigBlindCountTextClass(worstSession.profitBb)}
+              />
+            )
           }
-          value={worstSession === null ? "-" : formatSignedBigBlindCount(worstSession.profitBb)}
         />
         <StatTile label="Average Session Length" value={formatDuration(averageSessionLength)} />
         <StatTile
@@ -1354,49 +1427,985 @@ function SessionsSection({
             </tr>
           </thead>
           <tbody>
-            {sessions.map((session) => (
-              <tr
-                key={session.id}
-                className={`odd:bg-white even:bg-zinc-50/80 hover:bg-emerald-50/50 ${
-                  selectedSessionId === session.id ? "bg-emerald-50/70" : ""
-                }`}
-              >
-                <td className={TABLE_CELL_CLASS}>
-                  <span className="font-medium text-zinc-950">
-                    {formatSessionDate(session.startTime)}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-zinc-500">
-                    {formatSessionDate(session.endTime)}
-                  </span>
-                  <SessionWarnings session={session} />
-                </td>
-                <td className={TABLE_CELL_CLASS}>{formatDuration(session.durationMinutes)}</td>
-                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatNumber(session.handCount)}</td>
-                <td className={TABLE_NUMERIC_CELL_CLASS}>
-                  {formatNumber(session.estimatedTables)}
-                </td>
-                <td className={TABLE_NUMERIC_CELL_CLASS}>
-                  <SessionProfitDisplay session={session} />
-                </td>
-                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatSignedNumber(session.bbPer100)}</td>
-                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.vpip)}</td>
-                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.pfr)}</td>
-                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.wtsd)}</td>
-                <td className={TABLE_NUMERIC_CELL_CLASS}>{formatNumber(session.splashPotCount)}</td>
-                <td className={TABLE_CELL_CLASS}>
-                  <button
-                    className={SMALL_BUTTON_CLASS}
-                    type="button"
-                    onClick={() => onSelectSession(session.id)}
-                  >
-                    View
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {sessions.map((session) => {
+              const isSelected = selectedSessionId === session.id;
+
+              return (
+                <tr
+                  key={session.id}
+                  className={
+                    isSelected
+                      ? "bg-zinc-50 ring-1 ring-inset ring-emerald-200 hover:bg-zinc-50"
+                      : "odd:bg-white even:bg-zinc-50/80 hover:bg-zinc-100/70"
+                  }
+                >
+                  <td className={TABLE_CELL_CLASS}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-zinc-950">
+                        {formatSessionDate(session.startTime)}
+                      </span>
+                      {isSelected ? (
+                        <span className="rounded-md border border-emerald-200 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-800">
+                          Selected
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className="mt-0.5 block text-xs text-zinc-500">
+                      {formatSessionDate(session.endTime)}
+                    </span>
+                    <SessionWarnings session={session} />
+                  </td>
+                  <td className={TABLE_CELL_CLASS}>{formatDuration(session.durationMinutes)}</td>
+                  <td className={TABLE_NUMERIC_CELL_CLASS}>{formatNumber(session.handCount)}</td>
+                  <td className={TABLE_NUMERIC_CELL_CLASS}>
+                    {formatNumber(session.estimatedTables)}
+                  </td>
+                  <td className={TABLE_NUMERIC_CELL_CLASS}>
+                    <SessionProfitDisplay session={session} />
+                  </td>
+                  <td className={TABLE_NUMERIC_CELL_CLASS}>
+                    {formatSignedNumber(session.bbPer100)}
+                  </td>
+                  <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.vpip)}</td>
+                  <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.pfr)}</td>
+                  <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(session.wtsd)}</td>
+                  <td className={TABLE_NUMERIC_CELL_CLASS}>
+                    {formatNumber(session.splashPotCount)}
+                  </td>
+                  <td className={TABLE_CELL_CLASS}>
+                    <button
+                      className={SMALL_BUTTON_CLASS}
+                      type="button"
+                      onClick={() => onSelectSession(session.id)}
+                    >
+                      View
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+function getSessionInsightClassificationClass(
+  classification: SessionInsightClassification,
+): string {
+  if (classification === "improved") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  }
+
+  if (classification === "worse") {
+    return "border-red-200 bg-red-50 text-red-800";
+  }
+
+  return "border-zinc-200 bg-zinc-50 text-zinc-600";
+}
+
+function formatSessionInsightValue(row: SessionScorecardRow, value: number): string {
+  if (row.format === "count") {
+    return formatNumber(value);
+  }
+
+  if (row.format === "duration") {
+    return formatDuration(value);
+  }
+
+  if (row.format === "bb") {
+    return formatSignedBigBlindCount(value);
+  }
+
+  if (row.format === "bbPer100") {
+    return formatSignedNumber(value);
+  }
+
+  return formatPercent(value);
+}
+
+function formatSessionInsightDelta(row: SessionScorecardRow): string {
+  if (row.classification === "similar") {
+    return "Similar";
+  }
+
+  const direction = row.classification === "improved" ? "Improved" : "Worse";
+  const absoluteDelta = Math.abs(row.delta);
+
+  if (row.format === "duration") {
+    return `${direction} (${formatDuration(absoluteDelta)})`;
+  }
+
+  if (row.format === "bb") {
+    return `${direction} (${formatSignedBigBlindCount(row.delta)})`;
+  }
+
+  if (row.format === "bbPer100") {
+    return `${direction} (${formatSignedNumber(row.delta)})`;
+  }
+
+  if (row.format === "percent") {
+    return `${direction} (${formatSignedNumber(row.delta)} pts)`;
+  }
+
+  return `${direction} (${formatSignedNumber(row.delta)})`;
+}
+
+function formatSessionInsightMagnitude(row: SessionScorecardRow): string {
+  const absoluteDelta = Math.abs(row.delta);
+
+  if (row.format === "duration") {
+    return formatDuration(absoluteDelta);
+  }
+
+  if (row.format === "bb") {
+    return formatBigBlindCount(absoluteDelta);
+  }
+
+  if (row.format === "bbPer100") {
+    return `${formatNumber(absoluteDelta)} BB/100`;
+  }
+
+  if (row.format === "percent") {
+    return `${formatNumber(absoluteDelta)} pts`;
+  }
+
+  return formatNumber(absoluteDelta);
+}
+
+function getCoachingPriority(row: SessionScorecardRow): number {
+  const priority = [
+    "vpipPfrGap",
+    "bbProfitBb",
+    "btnProfitBb",
+    "profitBb",
+    "wtsd",
+    "vpip",
+    "bbPer100",
+    "pfr",
+    "threeBet",
+    "wsd",
+    "sbProfitBb",
+  ].indexOf(row.key);
+
+  return priority === -1 ? 99 : priority;
+}
+
+function getSessionCoachingMessage(row: SessionScorecardRow): string {
+  const magnitude = formatSessionInsightMagnitude(row);
+
+  if (row.key === "vpipPfrGap") {
+    if (row.classification === "improved") {
+      return `VPIP/PFR gap improved by ${magnitude}.`;
+    }
+
+    if (row.classification === "worse") {
+      return `VPIP/PFR gap widened by ${magnitude}.`;
+    }
+
+    return "VPIP/PFR gap stayed near average.";
+  }
+
+  if (row.key === "btnProfitBb") {
+    if (row.classification === "improved") {
+      return `BTN profitability improved by ${magnitude}.`;
+    }
+
+    if (row.classification === "worse") {
+      return `BTN profitability fell by ${magnitude}.`;
+    }
+
+    return "BTN profitability stayed near average.";
+  }
+
+  if (row.key === "bbProfitBb") {
+    if (row.classification === "improved") {
+      return `BB losses improved by ${magnitude}.`;
+    }
+
+    if (row.classification === "worse") {
+      return `BB losses worsened by ${magnitude}.`;
+    }
+
+    return "BB defense stayed near average.";
+  }
+
+  if (row.key === "profitBb") {
+    if (row.classification === "improved") {
+      return `Session profit finished ${magnitude} above average.`;
+    }
+
+    if (row.classification === "worse") {
+      return "Session profit was below historical average.";
+    }
+
+    return "Session profit stayed near average.";
+  }
+
+  if (row.key === "wtsd") {
+    if (row.classification === "improved") {
+      return `WTSD improved by ${magnitude}.`;
+    }
+
+    if (row.classification === "worse") {
+      return `WTSD increased by ${magnitude}.`;
+    }
+
+    return "Showdown discipline unchanged.";
+  }
+
+  if (row.key === "vpip") {
+    if (row.classification === "improved") {
+      return `VPIP tightened by ${magnitude}.`;
+    }
+
+    if (row.classification === "worse") {
+      return `VPIP widened by ${magnitude}.`;
+    }
+
+    return "VPIP stayed near average.";
+  }
+
+  if (row.key === "bbPer100") {
+    if (row.classification === "improved") {
+      return `Winrate improved by ${magnitude}.`;
+    }
+
+    if (row.classification === "worse") {
+      return `Winrate fell by ${magnitude}.`;
+    }
+
+    return "Winrate stayed near average.";
+  }
+
+  if (row.classification === "improved") {
+    return `${row.label} improved by ${magnitude}.`;
+  }
+
+  if (row.classification === "worse") {
+    return `${row.label} worsened by ${magnitude}.`;
+  }
+
+  return `${row.label} stayed near average.`;
+}
+
+function getSessionCoachingRows(
+  rows: readonly SessionScorecardRow[],
+  classification: SessionInsightClassification,
+): SessionScorecardRow[] {
+  return rows
+    .filter((row) => row.classification === classification)
+    .sort((left, right) => getCoachingPriority(left) - getCoachingPriority(right));
+}
+
+function SessionCoachingGroup({
+  title,
+  rows,
+  fallback,
+}: Readonly<{
+  title: string;
+  rows: readonly SessionScorecardRow[];
+  fallback: string;
+}>) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50/70 px-2.5 py-2">
+      <h4 className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{title}</h4>
+      {rows.length === 0 ? (
+        <p className="mt-1 text-xs leading-4 text-zinc-600">{fallback}</p>
+      ) : (
+        <ul className="mt-1 space-y-1 text-xs leading-4 text-zinc-700">
+          {rows.map((row) => (
+            <li key={row.key}>{getSessionCoachingMessage(row)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SessionInsightsSection({
+  insights,
+}: Readonly<{
+  insights: SessionInsightResult;
+}>) {
+  const selectedSession = insights.selectedSession;
+  const mostImprovedRows = getSessionCoachingRows(insights.scorecardRows, "improved").slice(0, 2);
+  const concernRows = getSessionCoachingRows(insights.scorecardRows, "worse").slice(0, 2);
+  const neutralRows = getSessionCoachingRows(insights.scorecardRows, "similar").slice(0, 2);
+
+  return (
+    <section className={`${SECTION_GAP_CLASS} max-w-6xl`}>
+      <SectionHeader
+        title="Session Insights"
+        description="Selected session compared against historical session averages."
+      />
+      {selectedSession === null || insights.scorecardRows.length === 0 ? (
+        <p className={`${CARD_CLASS} p-3 text-sm text-zinc-600`}>Not enough session history yet.</p>
+      ) : (
+        <>
+          <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className={`${CARD_CLASS} p-3`}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                    Selected Session
+                  </p>
+                  <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-zinc-950">
+                    {formatSessionDateRange(selectedSession)}
+                  </p>
+                </div>
+                <span className="rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-600">
+                  Baseline: {formatSessionsCount(insights.baselineSessions.length)}
+                </span>
+              </div>
+              {insights.lowConfidenceReason === null ? null : (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-900">
+                  {insights.lowConfidenceReason}
+                </p>
+              )}
+              <div className="mt-3">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                  Session Highlights
+                </h3>
+                {insights.highlights.length === 0 ? (
+                  <p className="mt-1.5 text-xs text-zinc-600">No clear session highlight yet.</p>
+                ) : (
+                  <ul className="mt-1.5 space-y-1.5 text-sm leading-5 text-zinc-700">
+                    {insights.highlights.map((highlight) => (
+                      <li key={highlight}>{highlight}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <div className={`${CARD_CLASS} p-3`}>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                Session Trend Summary
+              </h3>
+              {insights.lowConfidence ? (
+                <p className="mt-1.5 text-xs text-zinc-600">
+                  Trend summary needs more session history.
+                </p>
+              ) : null}
+              <div className="mt-2 grid gap-2 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+                <SessionCoachingGroup
+                  fallback="No clear improvement stood out."
+                  rows={mostImprovedRows}
+                  title="Most Improved"
+                />
+                <SessionCoachingGroup
+                  fallback="No major concern stood out."
+                  rows={concernRows}
+                  title="Biggest Concern"
+                />
+                <SessionCoachingGroup
+                  fallback="No neutral observations yet."
+                  rows={neutralRows}
+                  title="Neutral Observations"
+                />
+              </div>
+            </div>
+          </div>
+          <div className={`${TABLE_CONTAINER_CLASS} max-w-4xl`}>
+            <table className={`${TABLE_CLASS} min-w-[680px]`}>
+              <thead className={TABLE_HEAD_CLASS}>
+                <tr>
+                  <th className={TABLE_HEADER_CELL_CLASS}>Metric</th>
+                  <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Session</th>
+                  <th className={`${TABLE_HEADER_CELL_CLASS} text-right`}>Average</th>
+                  <th className={TABLE_HEADER_CELL_CLASS}>Delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {insights.scorecardRows.map((row) => (
+                  <tr key={row.key} className="odd:bg-white even:bg-zinc-50/60">
+                    <td className="border-b border-zinc-100 px-3 py-1.5 align-middle">
+                      <span className="font-semibold text-zinc-950">{row.label}</span>
+                    </td>
+                    <td className="border-b border-zinc-100 px-3 py-1.5 text-right align-middle font-mono text-sm font-semibold tabular-nums text-zinc-950">
+                      <span className="inline-block min-w-16">
+                        {formatSessionInsightValue(row, row.sessionValue)}
+                      </span>
+                    </td>
+                    <td className="border-b border-zinc-100 px-3 py-1.5 text-right align-middle font-mono text-[13px] tabular-nums text-zinc-500">
+                      <span className="inline-block min-w-16">
+                        {formatSessionInsightValue(row, row.averageValue)}
+                      </span>
+                    </td>
+                    <td className="border-b border-zinc-100 px-3 py-1.5 align-middle">
+                      <span
+                        className={`inline-flex min-w-20 justify-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${getSessionInsightClassificationClass(
+                          row.classification,
+                        )}`}
+                      >
+                        {formatSessionInsightDelta(row)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function StudyQuizSection({
+  hands,
+  leaks,
+  onOpenHand,
+}: Readonly<{
+  hands: readonly PokerHand[];
+  leaks: readonly LeakResult[];
+  onOpenHand: (hand: PokerHand) => void;
+}>) {
+  const [quizTypeFilter, setQuizTypeFilter] = useState<QuizTypeFilter>("All");
+  const [isStudyModeOpen, setIsStudyModeOpen] = useState(false);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [isAnswerVisible, setIsAnswerVisible] = useState(false);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
+  const allQuestions = useMemo(
+    () => generateQuizQuestions(hands, { filter: "All", leaks }),
+    [hands, leaks],
+  );
+  const questions = useMemo(
+    () => generateQuizQuestions(hands, { filter: quizTypeFilter, leaks }),
+    [hands, leaks, quizTypeFilter],
+  );
+  const breakdown = useMemo(
+    () =>
+      QUIZ_TYPE_FILTER_OPTIONS.filter((option) => option !== "All").map((option) => ({
+        label: option,
+        count: generateQuizQuestions(hands, { filter: option, leaks }).length,
+      })),
+    [hands, leaks],
+  );
+  const score = useMemo(
+    () => scoreQuizAnswers(questions, selectedAnswers),
+    [questions, selectedAnswers],
+  );
+  const currentQuestion = isStudyModeOpen ? questions[currentQuestionIndex] : undefined;
+  const currentHand =
+    currentQuestion === undefined
+      ? undefined
+      : hands.find((hand) => hand.handId === currentQuestion.handId);
+  const visibleQuizInformation =
+    currentQuestion === undefined
+      ? undefined
+      : getVisibleQuizInformation(currentQuestion, currentHand, isAnswerVisible);
+  const selectedOption =
+    currentQuestion === undefined || selectedOptionId === null
+      ? undefined
+      : currentQuestion.options.find((option) => option.id === selectedOptionId);
+  const recommendedOption =
+    currentQuestion?.correctOptionId === undefined
+      ? undefined
+      : currentQuestion.options.find((option) => option.id === currentQuestion.correctOptionId);
+  const defensiveOptions =
+    currentQuestion?.options.filter((option) =>
+      ["fold", "check", "call"].includes(option.action),
+    ) ?? [];
+  const aggressiveOptions =
+    currentQuestion?.options.filter(
+      (option) =>
+        !["fold", "check", "call"].includes(option.action) && !option.action.startsWith("review-"),
+    ) ?? [];
+  const reviewOptions =
+    currentQuestion?.options.filter((option) => option.action.startsWith("review-")) ?? [];
+
+  function resetQuestionState(): void {
+    setCurrentQuestionIndex(0);
+    setSelectedOptionId(null);
+    setIsAnswerVisible(false);
+    setSelectedAnswers({});
+  }
+
+  function startQuiz(): void {
+    resetQuestionState();
+    setIsStudyModeOpen(true);
+  }
+
+  function closeQuiz(): void {
+    setIsStudyModeOpen(false);
+  }
+
+  function showAnswer(): void {
+    if (currentQuestion === undefined || selectedOptionId === null) {
+      return;
+    }
+
+    setSelectedAnswers((answers) => ({
+      ...answers,
+      [currentQuestion.id]: selectedOptionId,
+    }));
+    setIsAnswerVisible(true);
+  }
+
+  function showNextQuestion(): void {
+    setCurrentQuestionIndex((index) => Math.min(index + 1, questions.length - 1));
+    setSelectedOptionId(null);
+    setIsAnswerVisible(false);
+  }
+
+  function handleFilterChange(event: React.ChangeEvent<HTMLSelectElement>): void {
+    setQuizTypeFilter(event.target.value as QuizTypeFilter);
+    resetQuestionState();
+  }
+
+  function handleOpenHand(): void {
+    if (currentHand === undefined) {
+      return;
+    }
+
+    closeQuiz();
+    onOpenHand(currentHand);
+  }
+
+  useEffect(() => {
+    if (!isStudyModeOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        closeQuiz();
+        return;
+      }
+
+      if (currentQuestion === undefined) {
+        return;
+      }
+
+      if (/^[1-9]$/.test(event.key) && !isAnswerVisible) {
+        const option = currentQuestion.options[Number(event.key) - 1];
+
+        if (option !== undefined) {
+          event.preventDefault();
+          setSelectedOptionId(option.id);
+        }
+
+        return;
+      }
+
+      if (event.key === " " && selectedOptionId !== null && !isAnswerVisible) {
+        event.preventDefault();
+        showAnswer();
+        return;
+      }
+
+      if (event.key === "Enter" && isAnswerVisible && currentQuestionIndex < questions.length - 1) {
+        event.preventDefault();
+        showNextQuestion();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    currentQuestion,
+    currentQuestionIndex,
+    isAnswerVisible,
+    isStudyModeOpen,
+    questions.length,
+    selectedOptionId,
+  ]);
+
+  return (
+    <section className={SECTION_GAP_CLASS}>
+      <SectionHeader
+        title="Study Quiz"
+        description="Rule-based review spots generated from Hero hands."
+      />
+      <div className={`${CARD_CLASS} p-3`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-zinc-950">Quiz Launcher</h3>
+            {allQuestions.length === 0 ? (
+              <p className="mt-1 text-sm text-zinc-600">No quiz spots found in this import.</p>
+            ) : (
+              <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-zinc-800">
+                {formatNumber(allQuestions.length)} review spots generated
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex min-w-52 flex-col gap-1 text-sm">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                Quiz Type
+              </span>
+              <select
+                className={CONTROL_CLASS}
+                value={quizTypeFilter}
+                onChange={handleFilterChange}
+              >
+                {QUIZ_TYPE_FILTER_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className={BUTTON_CLASS}
+              disabled={allQuestions.length === 0}
+              type="button"
+              onClick={startQuiz}
+            >
+              Start Study Quiz
+            </button>
+          </div>
+        </div>
+        {allQuestions.length === 0 ? null : (
+          <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
+            {breakdown.map((item) => (
+              <div
+                key={item.label}
+                className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
+              >
+                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  {item.label}
+                </dt>
+                <dd className="mt-1 font-mono text-base font-semibold tabular-nums text-zinc-950">
+                  {formatNumber(item.count)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </div>
+
+      {isStudyModeOpen ? (
+        <div
+          aria-label="Study Quiz mode"
+          aria-modal="true"
+          className="fixed inset-0 z-40 flex flex-col bg-zinc-950 text-zinc-50"
+          role="dialog"
+        >
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950 px-5 py-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-400">
+                Study Quiz
+              </p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-white">
+                {questions.length === 0
+                  ? "No questions for this quiz type"
+                  : `Question ${formatNumber(currentQuestionIndex + 1)} / ${formatNumber(
+                      questions.length,
+                    )}`}
+              </h2>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 font-semibold text-zinc-200">
+                Quiz Type: {quizTypeFilter}
+              </span>
+              <span className="font-mono tabular-nums text-zinc-300">
+                Answered: {formatNumber(score.answered)} / {formatNumber(questions.length)}
+              </span>
+              <span className="font-mono tabular-nums text-zinc-300">
+                Accuracy: {formatNumber(score.accuracy)}%
+              </span>
+              <span className="font-mono tabular-nums text-zinc-300">
+                Correct: {formatNumber(score.correct)} / {formatNumber(score.answerableAnswered)}
+              </span>
+              <span className="font-mono tabular-nums text-zinc-300">
+                Review Spots: {formatNumber(score.reviewSpots)}
+              </span>
+              <button
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm font-medium text-zinc-100 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
+                type="button"
+                onClick={closeQuiz}
+              >
+                Close
+              </button>
+            </div>
+          </header>
+
+          {currentQuestion === undefined ? (
+            <main className="flex flex-1 items-center justify-center px-5 py-8">
+              <div className="max-w-md rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-4 text-center shadow-lg">
+                <h3 className="text-lg font-semibold text-white">
+                  No questions for this quiz type.
+                </h3>
+                <p className="mt-2 text-sm text-zinc-400">Try another quiz type.</p>
+              </div>
+            </main>
+          ) : (
+            <main className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-5 py-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+              <section className="flex min-h-0 flex-col gap-4">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 shadow-lg">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-md border border-amber-300/40 bg-amber-300/10 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-200">
+                      {currentQuestion.correctOptionId === undefined
+                        ? "Review-only spot"
+                        : "Recommended spot"}
+                    </span>
+                    <span className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-300">
+                      {STREET_LABELS[currentQuestion.street]}
+                    </span>
+                  </div>
+                  <h3 className="mt-4 max-w-4xl text-2xl font-semibold tracking-tight text-white">
+                    {currentQuestion.prompt}
+                  </h3>
+                  {currentQuestion.correctOptionId === undefined ? (
+                    <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300">
+                      This question is designed for hand review, not exact GTO scoring.
+                    </p>
+                  ) : null}
+                </div>
+
+                <dl className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {visibleQuizInformation?.decisionItems.map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-xl border border-zinc-800 bg-zinc-900 p-4"
+                    >
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                        {item.label}
+                      </dt>
+                      <dd
+                        className={`mt-2 whitespace-pre-wrap font-semibold tracking-tight text-white ${
+                          item.isMonospace ? "font-mono" : ""
+                        } ${item.isCompact ? "text-xl leading-7" : "text-3xl"}`}
+                      >
+                        {item.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+
+                <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                    Answers
+                  </h4>
+                  <div className="mt-3 grid gap-4 lg:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Defensive
+                      </p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3 lg:grid-cols-1 2xl:grid-cols-3">
+                        {defensiveOptions.length === 0 ? (
+                          <p className="text-sm text-zinc-500">No defensive options.</p>
+                        ) : (
+                          defensiveOptions.map((option, index) => (
+                            <button
+                              key={option.id}
+                              aria-pressed={selectedOptionId === option.id}
+                              className={`min-h-16 rounded-xl border px-4 py-3 text-left text-base font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-400/70 ${
+                                selectedOptionId === option.id
+                                  ? "border-emerald-400 bg-emerald-400/15 text-white"
+                                  : "border-zinc-700 bg-zinc-950 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800"
+                              }`}
+                              disabled={isAnswerVisible}
+                              type="button"
+                              onClick={() => setSelectedOptionId(option.id)}
+                            >
+                              <span className="block text-xs text-zinc-500">{index + 1}</span>
+                              {option.label}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Aggressive
+                      </p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+                        {aggressiveOptions.length === 0 ? (
+                          <p className="text-sm text-zinc-500">No aggressive options.</p>
+                        ) : (
+                          aggressiveOptions.map((option, index) => (
+                            <button
+                              key={option.id}
+                              aria-pressed={selectedOptionId === option.id}
+                              className={`min-h-16 rounded-xl border px-4 py-3 text-left text-base font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-400/70 ${
+                                selectedOptionId === option.id
+                                  ? "border-emerald-400 bg-emerald-400/15 text-white"
+                                  : "border-zinc-700 bg-zinc-950 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800"
+                              }`}
+                              disabled={isAnswerVisible}
+                              type="button"
+                              onClick={() => setSelectedOptionId(option.id)}
+                            >
+                              <span className="block text-xs text-zinc-500">
+                                {defensiveOptions.length + index + 1}
+                              </span>
+                              {option.label}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {reviewOptions.length === 0 ? null : (
+                    <div className="mt-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Review Tags
+                      </p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        {reviewOptions.map((option, index) => (
+                          <button
+                            key={option.id}
+                            aria-pressed={selectedOptionId === option.id}
+                            className={`min-h-16 rounded-xl border px-4 py-3 text-left text-base font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-400/70 ${
+                              selectedOptionId === option.id
+                                ? "border-emerald-400 bg-emerald-400/15 text-white"
+                                : "border-zinc-700 bg-zinc-950 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800"
+                            }`}
+                            disabled={isAnswerVisible}
+                            type="button"
+                            onClick={() => setSelectedOptionId(option.id)}
+                          >
+                            <span className="block text-xs text-zinc-500">
+                              {defensiveOptions.length + aggressiveOptions.length + index + 1}
+                            </span>
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      className="inline-flex h-11 items-center justify-center rounded-lg border border-emerald-500 bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-45"
+                      disabled={selectedOptionId === null || isAnswerVisible}
+                      type="button"
+                      onClick={showAnswer}
+                    >
+                      Show Answer
+                    </button>
+                    <button
+                      className="inline-flex h-11 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 px-4 text-sm font-semibold text-zinc-100 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-emerald-400/60 disabled:cursor-not-allowed disabled:opacity-45"
+                      disabled={!isAnswerVisible || currentQuestionIndex >= questions.length - 1}
+                      type="button"
+                      onClick={showNextQuestion}
+                    >
+                      Next Question
+                    </button>
+                  </div>
+
+                  {isAnswerVisible ? (
+                    <div className="mt-4 rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3">
+                      <p className="text-base font-semibold text-white">
+                        {currentQuestion.correctOptionId === undefined
+                          ? "Review-only"
+                          : selectedOptionId === currentQuestion.correctOptionId
+                            ? "✅ Correct"
+                            : "❌ Incorrect"}
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-300">
+                        Selected: {selectedOption?.label ?? "-"}
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-300">
+                        Recommended:{" "}
+                        {currentQuestion.correctOptionId === undefined
+                          ? currentQuestion.recommendedAnswer
+                          : (recommendedOption?.label ?? currentQuestion.recommendedAnswer)}
+                      </p>
+                      {currentQuestion.correctOptionId === undefined ? (
+                        <p className="mt-1 text-sm text-zinc-300">No correct answer available.</p>
+                      ) : null}
+                      {visibleQuizInformation?.outcomeItems.length === 0 ? null : (
+                        <dl className="mt-3 grid gap-2 md:grid-cols-2">
+                          {visibleQuizInformation?.outcomeItems.map((item) => (
+                            <div
+                              key={item.label}
+                              className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
+                            >
+                              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                {item.label}
+                              </dt>
+                              <dd
+                                className={`mt-1 whitespace-pre-wrap text-sm font-semibold text-zinc-200 ${
+                                  item.isMonospace ? "font-mono" : ""
+                                }`}
+                              >
+                                {item.value}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      )}
+                      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Why
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-zinc-300">
+                        {currentQuestion.explanation}
+                      </p>
+                      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        Study takeaway
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-zinc-300">
+                        {currentQuestion.takeaway}
+                      </p>
+                    </div>
+                  ) : null}
+                </section>
+              </section>
+
+              <aside className="flex flex-col gap-4">
+                <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                    Action Summary
+                  </h4>
+                  <p className="mt-2 whitespace-pre-wrap font-mono text-sm leading-6 text-zinc-200">
+                    {visibleQuizInformation?.actionSummary ?? "-"}
+                  </p>
+                </section>
+                <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+                  <dl className="grid gap-3 text-sm">
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                        Spot type
+                      </dt>
+                      <dd className="mt-1 font-semibold text-white">
+                        {QUIZ_SPOT_TYPE_LABELS[currentQuestion.spotType]}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                        Hand ID
+                      </dt>
+                      <dd className="mt-1 font-mono font-semibold text-white">
+                        {currentQuestion.handId}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                        Review status
+                      </dt>
+                      <dd className="mt-1 font-semibold text-white">
+                        {currentQuestion.correctOptionId === undefined
+                          ? "Review-only spot"
+                          : "Scored decision"}
+                      </dd>
+                    </div>
+                  </dl>
+                  {currentQuestion.context.isSplashPotReview ? (
+                    <p className="mt-3 w-fit rounded border border-amber-300/40 bg-amber-300/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-200">
+                      Splash Review Spot
+                    </p>
+                  ) : null}
+                  <button
+                    className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm font-semibold text-zinc-100 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
+                    disabled={currentHand === undefined}
+                    type="button"
+                    onClick={handleOpenHand}
+                  >
+                    Open Hand
+                  </button>
+                </section>
+              </aside>
+            </main>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1456,23 +2465,24 @@ function HandDetailPanel({
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-zinc-500">Hero net</dt>
-              <dd className="mt-1 flex flex-col font-mono tabular-nums">
-                <span
-                  className={`text-base font-semibold ${getPokerResultTextClass(heroNet.sign)}`}
-                >
-                  {heroNet.bbLabel}
-                </span>
-                <span className="text-xs font-medium text-zinc-500">{heroNet.currencyLabel}</span>
+              <dd className="mt-1">
+                <BigBlindCurrencyValue
+                  align="left"
+                  bbLabel={heroNet.bbLabel}
+                  currencyLabel={heroNet.currencyLabel}
+                  toneClass={getPokerResultTextClass(heroNet.sign)}
+                />
               </dd>
             </div>
             {totalPot === null ? null : (
               <div>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Pot</dt>
-                <dd className="mt-1 flex flex-col font-mono tabular-nums">
-                  <span className="text-base font-semibold text-zinc-950">{totalPot.bbLabel}</span>
-                  <span className="text-xs font-medium text-zinc-500">
-                    {totalPot.currencyLabel}
-                  </span>
+                <dd className="mt-1">
+                  <BigBlindCurrencyValue
+                    align="left"
+                    bbLabel={totalPot.bbLabel}
+                    currencyLabel={totalPot.currencyLabel}
+                  />
                 </dd>
               </div>
             )}
@@ -1548,8 +2558,10 @@ function HandDetailPanel({
                           )}
                         </td>
                         <td className={TABLE_NUMERIC_CELL_CLASS}>
-                          <span className="block font-semibold text-zinc-950">{stack.bbLabel}</span>
-                          <span className="block text-xs text-zinc-500">{stack.currencyLabel}</span>
+                          <BigBlindCurrencyValue
+                            bbLabel={stack.bbLabel}
+                            currencyLabel={stack.currencyLabel}
+                          />
                         </td>
                         <td className={TABLE_CELL_CLASS}>{player.isHero ? "Hero" : "-"}</td>
                       </tr>
@@ -1662,12 +2674,10 @@ function HandDetailPanel({
                             {entry.handDescription === null ? "" : ` (${entry.handDescription})`}
                           </td>
                           <td className={TABLE_NUMERIC_CELL_CLASS}>
-                            <span className="block font-semibold text-zinc-950">
-                              {collected.bbLabel}
-                            </span>
-                            <span className="block text-xs text-zinc-500">
-                              {collected.currencyLabel}
-                            </span>
+                            <BigBlindCurrencyValue
+                              bbLabel={collected.bbLabel}
+                              currencyLabel={collected.currencyLabel}
+                            />
                           </td>
                         </tr>
                       );
@@ -1721,6 +2731,10 @@ export function CoinPokerAnalyzer() {
   );
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
+    [selectedSessionId, sessions],
+  );
+  const sessionInsights = useMemo(
+    () => getSessionInsights(sessions, selectedSessionId),
     [selectedSessionId, sessions],
   );
   const handExplorerSourceHands = selectedSession?.hands ?? result?.hands ?? [];
@@ -1907,18 +2921,18 @@ export function CoinPokerAnalyzer() {
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.08),transparent_32rem),linear-gradient(180deg,#fafafa,#f4f4f5)] px-4 py-6 text-zinc-950 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-7">
-        <header className="flex flex-col gap-2 rounded-2xl border border-zinc-200/70 bg-white/80 px-5 py-5 shadow-sm shadow-zinc-200/50 backdrop-blur sm:px-6">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.08),transparent_32rem),linear-gradient(180deg,#fafafa,#f4f4f5)] px-4 py-4 text-zinc-950 sm:px-5 lg:px-7">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5">
+        <header className="flex flex-col gap-1.5 rounded-xl border border-zinc-200/70 bg-white/80 px-4 py-4 shadow-sm shadow-zinc-200/50 backdrop-blur sm:px-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
             CoinPoker Cash Analyzer V1
           </p>
           <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">
                 Local hand history tester
               </h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600">
+              <p className="mt-1.5 max-w-2xl text-sm leading-5 text-zinc-600">
                 Import a CoinPoker cash-game hand history and inspect the core tracker stats, leaks,
                 positions, starting hands, and individual hands locally.
               </p>
@@ -1926,13 +2940,13 @@ export function CoinPokerAnalyzer() {
           </div>
         </header>
 
-        <section className="rounded-3xl border border-dashed border-zinc-300 bg-white/90 p-3 shadow-sm shadow-zinc-200/50">
-          <label className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-transparent px-4 py-5 transition hover:border-emerald-200 hover:bg-emerald-50/40 focus-within:border-zinc-400 focus-within:ring-2 focus-within:ring-zinc-950/10">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition group-hover:scale-105 group-hover:bg-emerald-100">
-              <UploadCloud aria-hidden="true" className="h-6 w-6" strokeWidth={1.8} />
+        <section className="rounded-xl border border-dashed border-zinc-300 bg-white/90 p-2 shadow-sm shadow-zinc-200/50">
+          <label className="group flex cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-3 transition hover:border-emerald-200 hover:bg-emerald-50/40 focus-within:border-zinc-400 focus-within:ring-2 focus-within:ring-zinc-950/10">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition group-hover:bg-emerald-100">
+              <UploadCloud aria-hidden="true" className="h-5 w-5" strokeWidth={1.8} />
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="text-base font-semibold text-zinc-950">
+              <span className="text-sm font-semibold text-zinc-950">
                 Drop CoinPoker hand history here
               </span>
               <span className="text-sm text-zinc-600">or click to browse</span>
@@ -1962,7 +2976,7 @@ export function CoinPokerAnalyzer() {
           <>
             <section className={SECTION_GAP_CLASS}>
               <SectionHeader title="Summary" description={result.fileName} />
-              <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <StatTile
                   explanation={SUMMARY_EXPLANATIONS["Parsed hands"]}
                   label="Parsed hands"
@@ -1971,8 +2985,15 @@ export function CoinPokerAnalyzer() {
                 <StatTile
                   explanation={SUMMARY_EXPLANATIONS["Total profit"]}
                   label="Total profit"
-                  secondaryValue={formatCurrency(result.stats.totalProfit)}
-                  value={formatSignedBigBlindCount(result.stats.totalBigBlindsWon)}
+                  value={
+                    <ProfitValue
+                      align="left"
+                      primary={formatSignedBigBlindCount(result.stats.totalBigBlindsWon)}
+                      secondary={formatCurrency(result.stats.totalProfit)}
+                      size="large"
+                      toneClass={getBigBlindCountTextClass(result.stats.totalBigBlindsWon)}
+                    />
+                  }
                 />
                 <StatTile
                   explanation={SUMMARY_EXPLANATIONS["BB/100"]}
@@ -2036,7 +3057,7 @@ export function CoinPokerAnalyzer() {
                 <p className="-mt-2 text-xs font-medium text-zinc-500">
                   Normal insights exclude splash pots.
                 </p>
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <SummaryInsightCard
                     highlight={
                       summaryStartingHandInsights.mostProfitable === null ? undefined : (
@@ -2242,13 +3263,15 @@ export function CoinPokerAnalyzer() {
               onSelectSession={handleSelectSession}
             />
 
+            <SessionInsightsSection insights={sessionInsights} />
+
             {positionHighlights !== null ? (
               <section className={SECTION_GAP_CLASS}>
                 <SectionHeader
                   title="Position Analysis"
                   description="Position results are noisy on small samples. Use at least 1,000+ hands for meaningful winrate conclusions."
                 />
-                <dl className="grid gap-4 md:grid-cols-3">
+                <dl className="grid gap-3 md:grid-cols-3">
                   <PositionResultHighlight label="Best Position" stats={positionHighlights.best} />
                   <PositionResultHighlight
                     label="Worst Position"
@@ -2297,12 +3320,11 @@ export function CoinPokerAnalyzer() {
                           <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(stats.vpip)}</td>
                           <td className={TABLE_NUMERIC_CELL_CLASS}>{formatPercent(stats.pfr)}</td>
                           <td className={TABLE_NUMERIC_CELL_CLASS}>
-                            <span className="block font-semibold text-zinc-950">
-                              {formatSignedBigBlindCount(stats.totalBigBlindsWon)}
-                            </span>
-                            <span className="block text-xs text-zinc-500">
-                              {formatCurrency(stats.totalProfit)}
-                            </span>
+                            <ProfitValue
+                              primary={formatSignedBigBlindCount(stats.totalBigBlindsWon)}
+                              secondary={formatCurrency(stats.totalProfit)}
+                              toneClass={getBigBlindCountTextClass(stats.totalBigBlindsWon)}
+                            />
                           </td>
                           <td className={TABLE_NUMERIC_CELL_CLASS}>
                             {formatNumber(stats.bbPer100)}
@@ -2382,12 +3404,12 @@ export function CoinPokerAnalyzer() {
                 </div>
 
                 {selectedHoleCardCell === null ? (
-                  <p className={`${CARD_CLASS} p-4 text-sm text-zinc-600`}>
+                  <p className={`${CARD_CLASS} p-3 text-sm text-zinc-600`}>
                     Select a starting hand to inspect its occurrences.
                   </p>
                 ) : (
-                  <div className={`${CARD_CLASS} p-4`}>
-                    <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className={`${CARD_CLASS} p-3`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-semibold tracking-tight">
                           Selected Hand: {selectedHoleCardCell.notation}
@@ -2407,17 +3429,17 @@ export function CoinPokerAnalyzer() {
                         </div>
                         <div>
                           <dt className="text-xs uppercase tracking-wide text-zinc-500">Profit</dt>
-                          <dd className="mt-1 flex flex-col font-mono tabular-nums">
-                            <span
-                              className={`font-semibold ${getBigBlindCountTextClass(
+                          <dd className="mt-1">
+                            <ProfitValue
+                              align="left"
+                              primary={formatSignedBigBlindCount(
                                 selectedHoleCardCell.totalBigBlindsWon,
-                              )}`}
-                            >
-                              {formatSignedBigBlindCount(selectedHoleCardCell.totalBigBlindsWon)}
-                            </span>
-                            <span className="text-xs font-medium text-zinc-500">
-                              {formatCurrency(selectedHoleCardCell.totalProfit)}
-                            </span>
+                              )}
+                              secondary={formatCurrency(selectedHoleCardCell.totalProfit)}
+                              toneClass={getBigBlindCountTextClass(
+                                selectedHoleCardCell.totalBigBlindsWon,
+                              )}
+                            />
                           </dd>
                         </div>
                         <div>
@@ -2437,7 +3459,7 @@ export function CoinPokerAnalyzer() {
                       </dl>
                     </div>
 
-                    <div className={`mt-4 ${TABLE_CONTAINER_CLASS}`}>
+                    <div className={`mt-3 ${TABLE_CONTAINER_CLASS}`}>
                       <table className={`${TABLE_CLASS} min-w-[700px]`}>
                         <thead className={TABLE_HEAD_CLASS}>
                           <tr>
@@ -2472,16 +3494,11 @@ export function CoinPokerAnalyzer() {
                                   <td className={TABLE_CELL_CLASS}>{occurrence.date}</td>
                                   <td className={TABLE_CELL_CLASS}>{occurrence.position}</td>
                                   <td className={TABLE_NUMERIC_CELL_CLASS}>
-                                    <span
-                                      className={`block font-semibold ${getBigBlindCountTextClass(
-                                        occurrence.bigBlindsWon,
-                                      )}`}
-                                    >
-                                      {formatSignedBigBlindCount(occurrence.bigBlindsWon)}
-                                    </span>
-                                    <span className="block text-xs text-zinc-500">
-                                      {formatCurrency(occurrence.profit)}
-                                    </span>
+                                    <ProfitValue
+                                      primary={formatSignedBigBlindCount(occurrence.bigBlindsWon)}
+                                      secondary={formatCurrency(occurrence.profit)}
+                                      toneClass={getBigBlindCountTextClass(occurrence.bigBlindsWon)}
+                                    />
                                   </td>
                                   <td className={TABLE_CELL_CLASS}>
                                     {hand === null ? "-" : formatHeroShowdownStatus(hand)}
@@ -2518,8 +3535,8 @@ export function CoinPokerAnalyzer() {
                 <ul className="grid gap-3">
                   {result.leaks.map((leak) => (
                     <li key={leak.id} className={`${CARD_CLASS} overflow-hidden`}>
-                      <div className="flex gap-4 p-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200 bg-amber-100 text-amber-800">
+                      <div className="flex gap-3 p-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-200 bg-amber-100 text-amber-800">
                           <AlertTriangle aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
                         </div>
                         <div className="min-w-0 flex-1">
@@ -2532,7 +3549,7 @@ export function CoinPokerAnalyzer() {
                               {leak.category}
                             </span>
                           </div>
-                          <div className="mt-3 font-mono text-sm leading-6 text-zinc-700">
+                          <div className="mt-2 font-mono text-sm leading-5 text-zinc-700">
                             <p>
                               {getLeakMetricLabel(leak.metric)}: {formatLeakMetricValue(leak)}
                             </p>
@@ -2540,8 +3557,8 @@ export function CoinPokerAnalyzer() {
                               {getLeakThresholdLabel(leak)}: {formatLeakThresholdValue(leak)}
                             </p>
                           </div>
-                          <p className="mt-2 text-sm leading-6 text-zinc-600">{leak.explanation}</p>
-                          <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <p className="mt-2 text-sm leading-5 text-zinc-600">{leak.explanation}</p>
+                          <div className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
                             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                               Recommendation
                             </p>
@@ -2555,11 +3572,17 @@ export function CoinPokerAnalyzer() {
                   ))}
                 </ul>
               ) : (
-                <p className={`${CARD_CLASS} p-4 text-sm text-zinc-600`}>
+                <p className={`${CARD_CLASS} p-3 text-sm text-zinc-600`}>
                   No V1 leaks detected, or the sample is too small for guarded leak rules.
                 </p>
               )}
             </section>
+
+            <StudyQuizSection
+              hands={result.hands}
+              leaks={result.leaks}
+              onOpenHand={setSelectedHand}
+            />
 
             <section className={SECTION_GAP_CLASS}>
               <SectionHeader
@@ -2590,22 +3613,29 @@ export function CoinPokerAnalyzer() {
                   </button>
                 </div>
               )}
-              <dl className="grid gap-4 sm:grid-cols-3">
+              <dl className="grid gap-3 sm:grid-cols-3">
                 <StatTile
                   label="Filtered hands"
                   value={formatNumber(handExplorerSummary.handsCount)}
                 />
                 <StatTile
                   label="Filtered profit"
-                  secondaryValue={formatCurrency(handExplorerSummary.totalProfit)}
-                  value={formatSignedBigBlindCount(handExplorerSummary.totalBigBlindsWon)}
+                  value={
+                    <ProfitValue
+                      align="left"
+                      primary={formatSignedBigBlindCount(handExplorerSummary.totalBigBlindsWon)}
+                      secondary={formatCurrency(handExplorerSummary.totalProfit)}
+                      size="large"
+                      toneClass={getBigBlindCountTextClass(handExplorerSummary.totalBigBlindsWon)}
+                    />
+                  }
                 />
                 <StatTile
                   label="Average filtered BB/100"
                   value={formatSignedNumber(handExplorerSummary.bbPer100)}
                 />
               </dl>
-              <div className={`${CARD_CLASS} grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-8`}>
+              <div className={`${CARD_CLASS} grid gap-3 p-3 md:grid-cols-2 xl:grid-cols-8`}>
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
                     Position
@@ -2883,24 +3913,21 @@ export function CoinPokerAnalyzer() {
                               {formatBoard(hand) || "-"}
                             </td>
                             <td className={TABLE_NUMERIC_CELL_CLASS}>
-                              <span className="block font-semibold text-zinc-950">
-                                {pot?.bbLabel ?? "-"}
-                              </span>
-                              <span className="block text-xs text-zinc-500">
-                                {pot?.currencyLabel ?? "-"}
-                              </span>
+                              {pot === null ? (
+                                "-"
+                              ) : (
+                                <BigBlindCurrencyValue
+                                  bbLabel={pot.bbLabel}
+                                  currencyLabel={pot.currencyLabel}
+                                />
+                              )}
                             </td>
                             <td className={TABLE_NUMERIC_CELL_CLASS}>
-                              <span
-                                className={`block font-semibold ${getPokerResultTextClass(
-                                  heroNet.sign,
-                                )}`}
-                              >
-                                {heroNet.bbLabel}
-                              </span>
-                              <span className="block text-xs text-zinc-500">
-                                {heroNet.currencyLabel}
-                              </span>
+                              <BigBlindCurrencyValue
+                                bbLabel={heroNet.bbLabel}
+                                currencyLabel={heroNet.currencyLabel}
+                                toneClass={getPokerResultTextClass(heroNet.sign)}
+                              />
                             </td>
                             <td className={TABLE_CELL_CLASS}>{formatHeroShowdownStatus(hand)}</td>
                             <td className={TABLE_CELL_CLASS}>
