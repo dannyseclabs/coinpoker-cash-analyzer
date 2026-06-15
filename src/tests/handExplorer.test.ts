@@ -106,17 +106,25 @@ function createHand({
   };
 }
 
-function createHeroAction(type: HandAction["type"]): HandAction {
+function createHeroAction(type: Extract<HandAction["type"], "muck" | "show">): HandAction {
+  return createShowdownAction("Hero", type, 1);
+}
+
+function createShowdownAction(
+  playerName: string,
+  type: Extract<HandAction["type"], "muck" | "show">,
+  order: number,
+): HandAction {
   return {
     street: "river",
-    order: 1,
-    playerName: "Hero",
+    order,
+    playerName,
     type,
     amount: null,
     raiseTo: null,
     cards: null,
     handDescription: null,
-    rawLine: `Hero: ${type}`,
+    rawLine: `${playerName}: ${type}`,
   };
 }
 
@@ -128,8 +136,20 @@ const hands = [
     heroCards: ["Ah", "Kh"],
     heroNetResult: 0.42,
     totalPot: 1.2,
-    showdown: true,
-    heroActions: [createHeroAction("show")],
+    showdownEntries: [
+      {
+        playerName: "Hero",
+        cards: ["Ah", "Kh"],
+        handDescription: "One Pair",
+        wonAmount: 0.42,
+      },
+      {
+        playerName: "Villain",
+        cards: ["Ad", "Qd"],
+        handDescription: "One Pair",
+        wonAmount: 0,
+      },
+    ],
   }),
   createHand({
     handId: "2",
@@ -241,7 +261,7 @@ describe("handExplorer", () => {
       heroPosition: "BTN",
       heroCards: ["Js", "Jh"],
       heroNetResult: -1,
-      heroActions: [createHeroAction("muck")],
+      heroActions: [createHeroAction("muck"), createShowdownAction("Villain", "show", 2)],
     });
     const rawShowdownButHeroFolded = createHand({
       handId: "other-showdown",

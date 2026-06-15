@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseCoinPokerFile } from "../lib/parser/parseCoinPokerFile";
 import { calculateStats } from "../lib/stats/calculateStats";
+import { getHandStatAudit } from "../lib/stats/handStatAudit";
 import type { PokerHand } from "../types";
 
 const fixturePath = join(process.cwd(), "src/tests/fixtures/coinpoker-v1-representative-hands.txt");
@@ -322,6 +323,164 @@ Seat 3: bb folded before Flop
 Seat 4: utg showed [Ah Ac] and won (₮0.21) with One Pair
 Seat 5: Hero showed [Kd Qd] and lost with One Pair
 Seat 6: co folded before Flop`;
+const heroRiverFoldFixture = `CoinPoker Hand #7000000015: NLH (₮0.01/₮0.02) 2026/06/09 13:25:00 CEST
+Table 'audit' 6-max Seat #1 is the button
+Seat 1: Hero (₮2 in chips)
+Seat 2: sb (₮2 in chips)
+Seat 3: bb (₮2 in chips)
+Seat 4: utg (₮2 in chips)
+Seat 5: hj (₮2 in chips)
+Seat 6: co (₮2 in chips)
+sb: posts small blind ₮0.01
+bb: posts big blind ₮0.02
+*** HOLE CARDS ***
+Dealt to Hero [Jd Td]
+utg: folds
+hj: folds
+co: folds
+Hero: raises ₮0.04 to ₮0.06
+sb: folds
+bb: calls ₮0.04
+*** FLOP *** [Js 8h 3d]
+bb: checks
+Hero: bets ₮0.08
+bb: calls ₮0.08
+*** TURN *** [Js 8h 3d] [2c]
+bb: checks
+Hero: checks
+*** RIVER *** [Js 8h 3d 2c] [Ah]
+bb: bets ₮0.20
+Hero: folds
+bb: RETURN ₮0.20
+*** SHOWDOWN ***
+bb collected ₮0.29 from pot
+*** SUMMARY ***
+Total pot ₮0.30 | Rake ₮0.01
+Hand was run once
+Board [ Js 8h 3d 2c Ah ]
+Game ended: 2026/06/09 13:26:00 CEST
+Seat 1: Hero folded on the River
+Seat 2: sb folded before Flop
+Seat 3: bb won (₮0.29)
+Seat 4: utg folded before Flop
+Seat 5: hj folded before Flop
+Seat 6: co folded before Flop`;
+const heroWinsBeforeShowdownFixture = `CoinPoker Hand #7000000016: NLH (₮0.01/₮0.02) 2026/06/09 13:30:00 CEST
+Table 'audit' 6-max Seat #1 is the button
+Seat 1: Hero (₮2 in chips)
+Seat 2: sb (₮2 in chips)
+Seat 3: bb (₮2 in chips)
+Seat 4: utg (₮2 in chips)
+Seat 5: hj (₮2 in chips)
+Seat 6: co (₮2 in chips)
+sb: posts small blind ₮0.01
+bb: posts big blind ₮0.02
+*** HOLE CARDS ***
+Dealt to Hero [Ad Qd]
+utg: folds
+hj: folds
+co: folds
+Hero: raises ₮0.04 to ₮0.06
+sb: folds
+bb: calls ₮0.04
+*** FLOP *** [Qs 7h 2d]
+bb: checks
+Hero: bets ₮0.08
+bb: folds
+Hero: RETURN ₮0.08
+*** SHOWDOWN ***
+Hero collected ₮0.13 from pot
+*** SUMMARY ***
+Total pot ₮0.13 | Rake ₮0
+Hand was run once
+Board [ Qs 7h 2d ]
+Game ended: 2026/06/09 13:30:30 CEST
+Seat 1: Hero won (₮0.13)
+Seat 2: sb folded before Flop
+Seat 3: bb folded on the Flop
+Seat 4: utg folded before Flop
+Seat 5: hj folded before Flop
+Seat 6: co folded before Flop`;
+const heroShowsAfterUncontestedWinFixture = `CoinPoker Hand #7000000018: NLH (₮0.01/₮0.02) 2026/06/09 13:40:00 CEST
+Table 'audit' 6-max Seat #1 is the button
+Seat 1: Hero (₮2 in chips)
+Seat 2: sb (₮2 in chips)
+Seat 3: bb (₮2 in chips)
+Seat 4: utg (₮2 in chips)
+Seat 5: hj (₮2 in chips)
+Seat 6: co (₮2 in chips)
+sb: posts small blind ₮0.01
+bb: posts big blind ₮0.02
+*** HOLE CARDS ***
+Dealt to Hero [Ad Qd]
+utg: folds
+hj: folds
+co: folds
+Hero: raises ₮0.04 to ₮0.06
+sb: folds
+bb: calls ₮0.04
+*** FLOP *** [Qs 7h 2d]
+bb: checks
+Hero: bets ₮0.08
+bb: folds
+Hero: RETURN ₮0.08
+*** SHOWDOWN ***
+Hero: shows [Ad Qd] (One Pair)
+Hero collected ₮0.13 from pot
+*** SUMMARY ***
+Total pot ₮0.13 | Rake ₮0
+Hand was run once
+Board [ Qs 7h 2d ]
+Game ended: 2026/06/09 13:40:30 CEST
+Seat 1: Hero showed [Ad Qd] and won (₮0.13) with One Pair
+Seat 2: sb folded before Flop
+Seat 3: bb folded on the Flop
+Seat 4: utg folded before Flop
+Seat 5: hj folded before Flop
+Seat 6: co folded before Flop`;
+const splitPotShowdownFixture = `CoinPoker Hand #7000000017: NLH (₮0.01/₮0.02) 2026/06/09 13:35:00 CEST
+Table 'audit' 6-max Seat #1 is the button
+Seat 1: Hero (₮2 in chips)
+Seat 2: sb (₮2 in chips)
+Seat 3: bb (₮2 in chips)
+Seat 4: utg (₮2 in chips)
+Seat 5: hj (₮2 in chips)
+Seat 6: co (₮2 in chips)
+sb: posts small blind ₮0.01
+bb: posts big blind ₮0.02
+*** HOLE CARDS ***
+Dealt to Hero [Ah Kd]
+utg: folds
+hj: folds
+co: folds
+Hero: raises ₮0.04 to ₮0.06
+sb: folds
+bb: calls ₮0.04
+*** FLOP *** [Qs Jd Tc]
+bb: checks
+Hero: checks
+*** TURN *** [Qs Jd Tc] [2h]
+bb: checks
+Hero: checks
+*** RIVER *** [Qs Jd Tc 2h] [3s]
+bb: checks
+Hero: checks
+*** SHOWDOWN ***
+Hero: shows [Ah Kd] (Straight)
+Hero collected ₮0.06 from pot
+bb: shows [Ac Kh] (Straight)
+bb collected ₮0.06 from pot
+*** SUMMARY ***
+Total pot ₮0.12 | Rake ₮0
+Hand was run once
+Board [ Qs Jd Tc 2h 3s ]
+Game ended: 2026/06/09 13:36:00 CEST
+Seat 1: Hero showed [Ah Kd] and won (₮0.06) with Straight
+Seat 2: sb folded before Flop
+Seat 3: bb showed [Ac Kh] and won (₮0.06) with Straight
+Seat 4: utg folded before Flop
+Seat 5: hj folded before Flop
+Seat 6: co folded before Flop`;
 
 function findHand(handId: string): PokerHand {
   const hand = hands.find((candidate) => candidate.handId === handId);
@@ -438,6 +597,75 @@ describe("calculateStats", () => {
     });
     expect(stats.sampleSizes.threeBetOpportunities).toBe(1);
     expect(stats.sampleSizes.wentToShowdown).toBe(1);
+  });
+
+  it("audits Hero street visibility, folded street, showdown flags, and showdown players", () => {
+    const audit = getHandStatAudit(parseSingleHand(heroRiverFoldFixture));
+
+    expect(audit).toMatchObject({
+      handId: "7000000015",
+      heroSawFlop: true,
+      heroSawTurn: true,
+      heroSawRiver: true,
+      heroReachedShowdown: false,
+      heroWonShowdown: false,
+      heroFoldedStreet: "river",
+      heroNetBB: -7,
+      board: "Js 8h 3d 2c Ah",
+      showdownPlayers: ["bb"],
+    });
+  });
+
+  it("does not count river folds or non-showdown wins as showdowns", () => {
+    const riverFoldStats = calculateStats([parseSingleHand(heroRiverFoldFixture)]);
+    const nonShowdownWinStats = calculateStats([parseSingleHand(heroWinsBeforeShowdownFixture)]);
+    const shownUncontestedStats = calculateStats([
+      parseSingleHand(heroShowsAfterUncontestedWinFixture),
+    ]);
+
+    expect(riverFoldStats.sampleSizes.sawFlop).toBe(1);
+    expect(riverFoldStats.sampleSizes.wentToShowdown).toBe(0);
+    expect(riverFoldStats.wtsd).toBe(0);
+    expect(riverFoldStats.wsd).toBe(0);
+    expect(nonShowdownWinStats.sampleSizes.sawFlop).toBe(1);
+    expect(nonShowdownWinStats.sampleSizes.wentToShowdown).toBe(0);
+    expect(nonShowdownWinStats.wtsd).toBe(0);
+    expect(nonShowdownWinStats.wsd).toBe(0);
+    expect(shownUncontestedStats.sampleSizes.sawFlop).toBe(1);
+    expect(shownUncontestedStats.sampleSizes.wentToShowdown).toBe(0);
+    expect(shownUncontestedStats.wtsd).toBe(0);
+    expect(shownUncontestedStats.wsd).toBe(0);
+  });
+
+  it("counts split pots as reached showdown and as won only when Hero is net positive", () => {
+    const hand = parseSingleHand(splitPotShowdownFixture);
+    const audit = getHandStatAudit(hand);
+    const stats = calculateStats([hand]);
+
+    expect(audit.heroReachedShowdown).toBe(true);
+    expect(audit.heroWonShowdown).toBe(false);
+    expect(audit.heroNetBB).toBe(0);
+    expect(stats.sampleSizes.wentToShowdown).toBe(1);
+    expect(stats.wtsd).toBe(100);
+    expect(stats.wsd).toBe(0);
+  });
+
+  it("calculates aggregate WTSD and W$SD from explicit tracker denominators", () => {
+    const stats = calculateStats([
+      parseSingleHand(heroFoldsBigBlindFixture),
+      parseSingleHand(villainDonksIntoPreflopAggressorFixture),
+      parseSingleHand(heroRiverFoldFixture),
+      parseSingleHand(heroWinsActualShowdownFixture),
+      parseSingleHand(heroLosesActualShowdownFixture),
+      parseSingleHand(heroWinsBeforeShowdownFixture),
+      parseSingleHand(multiwayShowdownFixture),
+      parseSingleHand(splitPotShowdownFixture),
+    ]);
+
+    expect(stats.sampleSizes.sawFlop).toBe(7);
+    expect(stats.sampleSizes.wentToShowdown).toBe(4);
+    expect(stats.wtsd).toBe(57.14);
+    expect(stats.wsd).toBe(25);
   });
 
   it("calculates hand count, profit, and BB/100 with each hand's big blind size", () => {

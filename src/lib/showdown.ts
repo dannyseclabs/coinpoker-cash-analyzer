@@ -2,35 +2,54 @@ import type { PokerHand } from "../types";
 
 const HERO_NAME = "Hero";
 
-function didHeroShowOrMuck(hand: PokerHand): boolean {
+function didPlayerShowOrMuck(hand: PokerHand, playerName: string): boolean {
   return hand.actions.some(
-    (action) => action.playerName === HERO_NAME && ["muck", "show"].includes(action.type),
+    (action) => action.playerName === playerName && ["muck", "show"].includes(action.type),
   );
 }
 
-function hasContestedShowdownCards(hand: PokerHand): boolean {
+function hasPlayerShowdownCards(hand: PokerHand, playerName: string): boolean {
   const entries = hand.showdown?.entries ?? [];
-  const heroShowedCards = entries.some(
-    (entry) => entry.playerName === HERO_NAME && entry.cards !== null,
-  );
-  const opponentShowedCards = entries.some(
-    (entry) => entry.playerName !== HERO_NAME && entry.cards !== null,
-  );
 
-  return heroShowedCards && opponentShowedCards;
+  return entries.some((entry) => entry.playerName === playerName && entry.cards !== null);
+}
+
+function getShowdownPlayerNames(hand: PokerHand): readonly string[] {
+  const playerNames = new Set<string>();
+
+  for (const action of hand.actions) {
+    if (["muck", "show"].includes(action.type)) {
+      playerNames.add(action.playerName);
+    }
+  }
+
+  for (const entry of hand.showdown?.entries ?? []) {
+    if (entry.cards !== null) {
+      playerNames.add(entry.playerName);
+    }
+  }
+
+  return [...playerNames];
+}
+
+function didPlayerReachShowdown(hand: PokerHand, playerName: string): boolean {
+  return didPlayerShowOrMuck(hand, playerName) || hasPlayerShowdownCards(hand, playerName);
+}
+
+function hasOpponentAtShowdown(hand: PokerHand): boolean {
+  return getShowdownPlayerNames(hand).some(
+    (playerName) => playerName !== HERO_NAME && didPlayerReachShowdown(hand, playerName),
+  );
 }
 
 export function didHeroReachTrackedShowdown(hand: PokerHand): boolean {
-  return didHeroShowOrMuck(hand) || hasContestedShowdownCards(hand);
+  return didPlayerReachShowdown(hand, HERO_NAME) && hasOpponentAtShowdown(hand);
 }
 
 export function didHeroWinTrackedShowdown(hand: PokerHand): boolean {
-  if (!didHeroReachTrackedShowdown(hand) || hand.showdown === null) {
+  if (!didHeroReachTrackedShowdown(hand)) {
     return false;
   }
 
-  return (
-    hand.showdown.winnerNames.includes(HERO_NAME) ||
-    hand.showdown.entries.some((entry) => entry.playerName === HERO_NAME && entry.wonAmount > 0)
-  );
+  return hand.heroNetResult > 0;
 }

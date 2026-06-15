@@ -5,7 +5,7 @@ import type {
   PositionStats,
   StatisticsResult,
 } from "../../types";
-import { didHeroReachTrackedShowdown, didHeroWinTrackedShowdown } from "../showdown";
+import { getHandStatAudit } from "./handStatAudit";
 
 const POSITIONS: readonly PokerPosition[] = ["UTG", "HJ", "CO", "BTN", "SB", "BB", "UNKNOWN"];
 const HERO_NAME = "Hero";
@@ -241,22 +241,6 @@ function analyzeFlop(hand: PokerHand): FlopStats {
   };
 }
 
-function didHeroReachShowdown(hand: PokerHand): boolean {
-  if (!didHeroSeeFlop(hand)) {
-    return false;
-  }
-
-  return didHeroReachTrackedShowdown(hand);
-}
-
-function didHeroWinAtShowdown(hand: PokerHand): boolean {
-  if (!didHeroReachShowdown(hand)) {
-    return false;
-  }
-
-  return didHeroWinTrackedShowdown(hand);
-}
-
 function createPositionAccumulator(position: PokerPosition): PositionAccumulator {
   return {
     position,
@@ -329,9 +313,10 @@ export function calculateStats(hands: readonly PokerHand[]): StatisticsResult {
       hand.stakes.bigBlind > 0 ? hand.heroNetResult / hand.stakes.bigBlind : 0;
     const preflopStats = analyzePreflop(hand);
     const flopStats = analyzeFlop(hand);
-    const sawFlop = didHeroSeeFlop(hand);
-    const reachedShowdown = didHeroReachShowdown(hand);
-    const wonAtShowdown = didHeroWinAtShowdown(hand);
+    const handStatAudit = getHandStatAudit(hand);
+    const sawFlop = handStatAudit.heroSawFlop;
+    const reachedShowdown = handStatAudit.heroReachedShowdown;
+    const wonAtShowdown = handStatAudit.heroWonShowdown;
     const positionAccumulator = positionAccumulators[hand.heroPosition];
 
     totalProfit += hand.heroNetResult;

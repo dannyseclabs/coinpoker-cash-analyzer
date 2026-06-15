@@ -361,7 +361,10 @@ describe("quizGenerator", () => {
           totalPot: 0.48,
           showdown: true,
           handDescription: "Top Pair",
-          actions: [createAction({ type: "show", street: "river", order: 9 })],
+          actions: [
+            createAction({ type: "show", street: "river", order: 9 }),
+            createAction({ playerName: "Villain", type: "show", street: "river", order: 10 }),
+          ],
         }),
       ],
       { filter: "Value Extraction" },
@@ -533,7 +536,10 @@ describe("quizGenerator", () => {
         heroNetResult: 0.32,
         showdown: true,
         handDescription: "Top Pair",
-        actions: [createAction({ type: "show", street: "river", order: 9 })],
+        actions: [
+          createAction({ type: "show", street: "river", order: 9 }),
+          createAction({ playerName: "Villain", type: "show", street: "river", order: 10 }),
+        ],
       }),
       createHand({
         handId: "river",
