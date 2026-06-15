@@ -129,6 +129,7 @@ const hands = [
     heroNetResult: 0.42,
     totalPot: 1.2,
     showdown: true,
+    heroActions: [createHeroAction("show")],
   }),
   createHand({
     handId: "2",
@@ -218,7 +219,7 @@ describe("handExplorer", () => {
     ).toEqual(["splash"]);
   });
 
-  it("detects Hero showdown only from Hero cards or Hero show/muck actions", () => {
+  it("detects Hero showdown only from contested cards or Hero show/muck actions", () => {
     const heroShowsInSummary = createHand({
       handId: "hero-show-summary",
       date: "2026/06/09 12:00:00 CEST",
@@ -272,11 +273,33 @@ describe("handExplorer", () => {
         },
       ],
     });
+    const contestedShowdownFromSummary = createHand({
+      handId: "contested-summary",
+      date: "2026/06/09 12:04:00 CEST",
+      heroPosition: "BTN",
+      heroCards: ["Qs", "Qh"],
+      heroNetResult: 1,
+      showdownEntries: [
+        {
+          playerName: "Hero",
+          cards: ["Qs", "Qh"],
+          handDescription: "One Pair",
+          wonAmount: 1,
+        },
+        {
+          playerName: "Villain",
+          cards: ["Js", "Jh"],
+          handDescription: "One Pair",
+          wonAmount: 0,
+        },
+      ],
+    });
 
-    expect(didHeroReachShowdown(heroShowsInSummary)).toBe(true);
+    expect(didHeroReachShowdown(heroShowsInSummary)).toBe(false);
     expect(didHeroReachShowdown(heroMucksAtShowdown)).toBe(true);
     expect(didHeroReachShowdown(rawShowdownButHeroFolded)).toBe(false);
     expect(didHeroReachShowdown(heroWinsWithoutShowing)).toBe(false);
+    expect(didHeroReachShowdown(contestedShowdownFromSummary)).toBe(true);
   });
 
   it("uses Hero showdown logic for showdown filtering", () => {

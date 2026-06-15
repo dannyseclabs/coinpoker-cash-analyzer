@@ -162,6 +162,39 @@ function createVisibleInfoQuestion(street: PokerStreet, correctOptionId = "call"
   };
 }
 
+function createButtonVsCutoffOpenHand(
+  heroCards: readonly [Card, Card],
+  handId = `btn-co-${heroCards.join("")}`,
+): PokerHand {
+  return createHand({
+    handId,
+    heroCards,
+    heroPosition: "BTN",
+    actions: [
+      createAction({ playerName: "co", type: "raise", order: 1, amount: 0.04, raiseTo: 0.06 }),
+      createAction({ type: "call", order: 2, amount: 0.06 }),
+    ],
+    players: [createPlayer("co", "CO"), createPlayer("Hero", "BTN", true)],
+  });
+}
+
+function createFacingUtgOpenHand(
+  heroCards: readonly [Card, Card],
+  heroPosition: PokerPosition = "BTN",
+  handId = `utg-open-${heroCards.join("")}`,
+): PokerHand {
+  return createHand({
+    handId,
+    heroCards,
+    heroPosition,
+    actions: [
+      createAction({ playerName: "utg", type: "raise", order: 1, amount: 0.04, raiseTo: 0.06 }),
+      createAction({ type: "call", order: 2, amount: 0.06 }),
+    ],
+    players: [createPlayer("utg", "UTG"), createPlayer("Hero", heroPosition, true)],
+  });
+}
+
 describe("quizGenerator", () => {
   it("creates no questions without hands", () => {
     expect(generateQuizQuestions([])).toEqual([]);
@@ -192,6 +225,97 @@ describe("quizGenerator", () => {
     });
     expect(questions[0]?.explanation).toContain("Likely better action");
     expect(questions[0]?.takeaway).toContain("discipline");
+  });
+
+  it("does not recommend fold for BTN versus CO open with KJs", () => {
+    const [question] = generateQuizQuestions([createButtonVsCutoffOpenHand(["Kh", "Jh"])], {
+      filter: "Preflop Discipline",
+    });
+
+    expect(question?.correctOptionId).not.toBe("fold");
+    expect(question?.recommendedAnswer).toBe("Call");
+    expect(question?.acceptableOptionIds).toContain("three-bet-small");
+  });
+
+  it("does not mark call as hard incorrect for BTN versus CO open with KJo", () => {
+    const [question] = generateQuizQuestions([createButtonVsCutoffOpenHand(["Kh", "Jd"])], {
+      filter: "Preflop Discipline",
+    });
+
+    if (question === undefined) {
+      throw new Error("Expected KJo preflop question.");
+    }
+
+    expect(question.correctOptionId).toBe("call");
+    expect(question.acceptableOptionIds).toEqual(
+      expect.arrayContaining(["fold", "three-bet-small"]),
+    );
+    expect(scoreQuizAnswers([question], { [question.id]: "call" })).toMatchObject({
+      correct: 1,
+      accuracy: 100,
+    });
+  });
+
+  it("allows call for BTN versus CO open with QJs", () => {
+    const [question] = generateQuizQuestions([createButtonVsCutoffOpenHand(["Qh", "Jh"])], {
+      filter: "Preflop Discipline",
+    });
+
+    expect(question?.correctOptionId).toBe("call");
+    expect(question?.acceptableOptionIds).toContain("three-bet-small");
+  });
+
+  it("recommends continuing rather than folding BTN versus CO open with TT", () => {
+    const [question] = generateQuizQuestions([createButtonVsCutoffOpenHand(["Th", "Td"])], {
+      filter: "Preflop Discipline",
+    });
+
+    expect(question?.correctOptionId).not.toBe("fold");
+    expect(["call", "three-bet-small"]).toContain(question?.correctOptionId);
+  });
+
+  it("recommends fold for BTN versus CO open with J8o", () => {
+    const [question] = generateQuizQuestions([createButtonVsCutoffOpenHand(["Jh", "8d"])], {
+      filter: "Preflop Discipline",
+    });
+
+    expect(question?.correctOptionId).toBe("fold");
+    expect(question?.recommendedAnswer).toBe("Fold");
+  });
+
+  it("can recommend fold versus UTG open with KJo", () => {
+    const [question] = generateQuizQuestions([createFacingUtgOpenHand(["Kh", "Jd"])], {
+      filter: "Preflop Discipline",
+    });
+
+    expect(question?.correctOptionId).toBe("fold");
+    expect(question?.recommendedAnswer).toBe("Fold");
+  });
+
+  it("scores acceptable preflop answers as accuracy-positive", () => {
+    const [question] = generateQuizQuestions([createButtonVsCutoffOpenHand(["Kh", "Jd"])], {
+      filter: "Preflop Discipline",
+    });
+
+    if (question === undefined) {
+      throw new Error("Expected KJo preflop question.");
+    }
+
+    expect(question.acceptableOptionIds).toContain("fold");
+    expect(scoreQuizAnswers([question], { [question.id]: "fold" })).toMatchObject({
+      answered: 1,
+      answerableAnswered: 1,
+      correct: 1,
+      accuracy: 100,
+    });
+  });
+
+  it("uses close mixed language for marginal BTN versus CO open spots", () => {
+    const [question] = generateQuizQuestions([createButtonVsCutoffOpenHand(["Kh", "Jd"])], {
+      filter: "Preflop Discipline",
+    });
+
+    expect(question?.explanation.toLowerCase()).toMatch(/close\/mixed|acceptable/);
   });
 
   it("creates answerable blind defense questions", () => {
@@ -237,6 +361,7 @@ describe("quizGenerator", () => {
           totalPot: 0.48,
           showdown: true,
           handDescription: "Top Pair",
+          actions: [createAction({ type: "show", street: "river", order: 9 })],
         }),
       ],
       { filter: "Value Extraction" },
@@ -408,6 +533,7 @@ describe("quizGenerator", () => {
         heroNetResult: 0.32,
         showdown: true,
         handDescription: "Top Pair",
+        actions: [createAction({ type: "show", street: "river", order: 9 })],
       }),
       createHand({
         handId: "river",

@@ -5,6 +5,7 @@ import type {
   PositionStats,
   StatisticsResult,
 } from "../../types";
+import { didHeroReachTrackedShowdown, didHeroWinTrackedShowdown } from "../showdown";
 
 const POSITIONS: readonly PokerPosition[] = ["UTG", "HJ", "CO", "BTN", "SB", "BB", "UNKNOWN"];
 const HERO_NAME = "Hero";
@@ -111,6 +112,20 @@ function didHeroHaveFlopDecision(hand: PokerHand): boolean {
   );
 }
 
+function didOpponentBetBeforeHeroFlopDecision(hand: PokerHand): boolean {
+  for (const action of hand.streetActions.flop) {
+    if (isHeroAction(action) && isFlopDecisionAction(action)) {
+      return false;
+    }
+
+    if (!isHeroAction(action) && isFlopAggressiveAction(action)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function analyzePreflop(hand: PokerHand): PreflopStats {
   let vpip = false;
   let pfr = false;
@@ -187,7 +202,8 @@ function analyzeFlop(hand: PokerHand): FlopStats {
     sawFlop &&
     preflopAggressor === HERO_NAME &&
     !didHeroMoveAllInPreflop(hand) &&
-    didHeroHaveFlopDecision(hand);
+    didHeroHaveFlopDecision(hand) &&
+    !didOpponentBetBeforeHeroFlopDecision(hand);
   const firstFlopAggressiveAction = hand.streetActions.flop.find(isFlopAggressiveAction);
   const cBet =
     cBetOpportunity &&
@@ -226,25 +242,19 @@ function analyzeFlop(hand: PokerHand): FlopStats {
 }
 
 function didHeroReachShowdown(hand: PokerHand): boolean {
-  if (!didHeroSeeFlop(hand) || hand.showdown === null) {
+  if (!didHeroSeeFlop(hand)) {
     return false;
   }
 
-  return (
-    hand.showdown.entries.some((entry) => entry.playerName === HERO_NAME) ||
-    hand.showdown.winnerNames.includes(HERO_NAME)
-  );
+  return didHeroReachTrackedShowdown(hand);
 }
 
 function didHeroWinAtShowdown(hand: PokerHand): boolean {
-  if (!didHeroReachShowdown(hand) || hand.showdown === null) {
+  if (!didHeroReachShowdown(hand)) {
     return false;
   }
 
-  return (
-    hand.showdown.winnerNames.includes(HERO_NAME) ||
-    hand.showdown.entries.some((entry) => entry.playerName === HERO_NAME && entry.wonAmount > 0)
-  );
+  return didHeroWinTrackedShowdown(hand);
 }
 
 function createPositionAccumulator(position: PokerPosition): PositionAccumulator {

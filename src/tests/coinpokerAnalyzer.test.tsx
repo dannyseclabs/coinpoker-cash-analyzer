@@ -187,6 +187,37 @@ Seat 3: btn33333 folded before Flop (didn't bet)
 Seat 4: sb333333 folded before Flop (didn't bet)
 Seat 5: Hero folded on the Turn`;
 
+const acceptableQuizFixture = `CoinPoker Hand #5555555555: NLH (₮0.01/₮0.02) 2026/06/07 22:10:00 CEST
+Table 'quiz-acceptable' 6-max Seat #3 is the button
+Seat 1: utg55555 (₮2 in chips)
+Seat 2: co555555 (₮2 in chips)
+Seat 3: Hero (₮2 in chips)
+Seat 4: sb555555 (₮2 in chips)
+Seat 5: bb555555 (₮2 in chips)
+sb555555: posts small blind ₮0.01
+bb555555: posts big blind ₮0.02
+*** HOLE CARDS ***
+Dealt to utg55555
+Dealt to co555555
+Dealt to Hero [Kh Jd]
+Dealt to sb555555
+Dealt to bb555555
+utg55555: folds
+co555555: raises ₮0.04 to ₮0.06
+Hero: folds
+sb555555: folds
+bb555555: folds
+co555555 collected ₮0.09 from pot
+*** SUMMARY ***
+Total pot ₮0.09 | Rake ₮0
+Hand was run once
+Game ended: 2026/06/07 22:11:00 CEST
+Seat 1: utg55555 folded before Flop (didn't bet)
+Seat 2: co555555 won (₮0.15)
+Seat 3: Hero folded before Flop
+Seat 4: sb555555 folded before Flop (didn't bet)
+Seat 5: bb555555 folded before Flop`;
+
 describe("CoinPokerAnalyzer dashboard", () => {
   it("shows hand detail player labels and action amounts in BB-first format", async () => {
     const file = new File([handDetailDrawerFixture], "drawer-test.txt", {
@@ -282,10 +313,10 @@ describe("CoinPokerAnalyzer dashboard", () => {
 
     expect(statusBadges).toHaveLength(8);
     expect(
-      summary.getByTitle(
+      summary.queryByTitle(
         "WTSD above 50% often indicates calling too many marginal hands to showdown.",
       ),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(summary.getByText("Very Loose")).toBeInTheDocument();
 
     const summaryHeading = screen.getByRole("heading", { name: "Summary" });
@@ -657,9 +688,9 @@ describe("CoinPokerAnalyzer dashboard", () => {
     expect(studyMode.getAllByText("Accuracy: 0%").length).toBeGreaterThan(0);
     expect(studyMode.getByText("Review Spots: 0")).toBeInTheDocument();
     expect(studyMode.getByText("Why")).toBeInTheDocument();
-    expect(studyMode.getByText(/cold-calling open raises/)).toBeInTheDocument();
+    expect(studyMode.getByText(/too dominated or disconnected/)).toBeInTheDocument();
     expect(studyMode.getByText("Study takeaway")).toBeInTheDocument();
-    expect(studyMode.getByText(/dominated versus an opener/)).toBeInTheDocument();
+    expect(studyMode.getByText(/domination problems/)).toBeInTheDocument();
 
     fireEvent.click(studyMode.getByRole("button", { name: "Next Question" }));
 
@@ -696,6 +727,45 @@ describe("CoinPokerAnalyzer dashboard", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Study Quiz mode" })).not.toBeInTheDocument();
     });
+  });
+
+  it("renders acceptable answer feedback in study quiz mode", async () => {
+    const file = new File([acceptableQuizFixture], "acceptable-quiz-hand.txt", {
+      type: "text/plain",
+    });
+    const { container } = render(<CoinPokerAnalyzer />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as HTMLInputElement, {
+      target: {
+        files: [file],
+      },
+    });
+
+    await screen.findByRole("heading", { name: "Study Quiz" });
+
+    const quiz = within(getSectionForHeading("Study Quiz"));
+    fireEvent.click(quiz.getByRole("button", { name: "Start Study Quiz" }));
+
+    const studyMode = within(
+      await screen.findByRole("dialog", {
+        name: "Study Quiz mode",
+      }),
+    );
+
+    expect(
+      studyMode.getByText("Hero BTN: KJo. Facing an open raise, what is the best default action?"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(studyMode.getByRole("button", { name: /Fold/ }));
+    fireEvent.click(studyMode.getByRole("button", { name: "Show Answer" }));
+
+    expect(studyMode.getByText("🟡 Acceptable")).toBeInTheDocument();
+    expect(studyMode.getByText("Recommended: Call")).toBeInTheDocument();
+    expect(studyMode.getByText("Also acceptable: Fold, 3bet small")).toBeInTheDocument();
+    expect(studyMode.getByText("Correct: 1 / 1")).toBeInTheDocument();
   });
 
   it("shows separate splash pot insight cards when huge pots exist", async () => {

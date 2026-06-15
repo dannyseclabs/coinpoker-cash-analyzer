@@ -65,6 +65,7 @@ export interface QuizQuestion {
   readonly context: QuizQuestionContext;
   readonly options: readonly QuizOption[];
   readonly correctOptionId?: string;
+  readonly acceptableOptionIds?: readonly string[];
   readonly recommendedAnswer: string;
   readonly explanation: string;
   readonly takeaway: string;
@@ -106,11 +107,19 @@ interface PreflopOpenContext {
   readonly facingAction: string;
 }
 
+interface PreflopRecommendation {
+  readonly correctOptionId: string;
+  readonly acceptableOptionIds?: readonly string[];
+  readonly recommendedAnswer: string;
+  readonly explanation: string;
+  readonly takeaway: string;
+}
+
 const DEFAULT_QUIZ_LIMIT = 20;
 const HERO_NAME = "Hero";
 const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"] as const;
 const WEAK_OFFSUIT_HANDS = new Set(["KTo", "QTo", "JTo", "QJo", "KJo", "ATo", "A9o", "K9o", "Q9o"]);
-const PREMIUM_HANDS = new Set(["AA", "KK", "QQ", "JJ", "AKs", "AKo"]);
+const PREMIUM_HANDS = new Set(["AA", "KK", "QQ", "JJ", "AKs", "AKo", "AQs"]);
 const STRONG_OPEN_HANDS = new Set([
   "TT",
   "99",
@@ -123,6 +132,23 @@ const STRONG_OPEN_HANDS = new Set([
   "QJs",
   "JTs",
 ]);
+const PREFLOP_THREE_BET_CANDIDATES = new Set(["AA", "KK", "QQ", "AKs", "AKo", "AQs", "AQo"]);
+const STRONG_PLAYABLE_VS_OPEN = new Set([
+  "JJ",
+  "TT",
+  "99",
+  "AJs",
+  "ATs",
+  "KQs",
+  "KJs",
+  "QJs",
+  "JTs",
+  "AQo",
+  "AJo",
+  "KQo",
+]);
+const MARGINAL_PLAYABLE_VS_STEAL = new Set(["KJo", "QJo", "KTs", "QTs", "T9s", "88", "77", "66"]);
+const CLEAR_FOLD_VS_STEAL = new Set(["J8o", "T8o", "98o", "K7o", "Q8o", "J9o", "A8o"]);
 const BLIND_CALL_HANDS = new Set(["K9s", "Q9s", "J9s", "T9s", "98s", "A9o", "KTo", "QTo"]);
 const BLIND_THREE_BET_HANDS = new Set([
   "AA",
@@ -547,6 +573,45 @@ function isSuited(notation: string): boolean {
   return notation.endsWith("s");
 }
 
+function isPairNotation(notation: string): boolean {
+  return notation.length === 2 && notation[0] === notation[1];
+}
+
+function getPairRankValue(notation: string): number {
+  return isPairNotation(notation) ? getRankValue(notation[0] ?? "2") : -1;
+}
+
+function isAceWheelSuited(notation: string): boolean {
+  return ["A5s", "A4s"].includes(notation);
+}
+
+function isVeryWeakOffsuit(notation: string): boolean {
+  if (!notation.endsWith("o")) {
+    return false;
+  }
+
+  const highRank = notation[0] ?? "2";
+  const lowRank = notation[1] ?? "2";
+
+  if (highRank === "A") {
+    return getRankValue(lowRank) <= getRankValue("8");
+  }
+
+  if (highRank === "K") {
+    return getRankValue(lowRank) <= getRankValue("7");
+  }
+
+  if (highRank === "Q") {
+    return getRankValue(lowRank) <= getRankValue("8");
+  }
+
+  if (highRank === "J") {
+    return getRankValue(lowRank) <= getRankValue("9");
+  }
+
+  return getHighRankValue(notation) <= getRankValue("T");
+}
+
 function getPlayerPosition(hand: PokerHand, playerName: string): PokerPosition {
   return hand.players.find((player) => player.name === playerName)?.position ?? "UNKNOWN";
 }
@@ -728,6 +793,149 @@ function getSplashExplanation(hand: PokerHand): string {
   return ` This is marked as a splash review spot because the pot was ${splashPot.potBb} BB; splash pots can distort normal review priorities.`;
 }
 
+function createPreflopRecommendation(
+  notation: string,
+  heroPosition: PokerPosition,
+  openerPosition: PokerPosition,
+): PreflopRecommendation {
+  const isButtonVsCutoffOpen = heroPosition === "BTN" && openerPosition === "CO";
+  const isTightOpen = openerPosition === "UTG" || openerPosition === "HJ";
+  const pairRank = getPairRankValue(notation);
+
+  if (PREFLOP_THREE_BET_CANDIDATES.has(notation) || isAceWheelSuited(notation)) {
+    return {
+      correctOptionId: "three-bet-small",
+      acceptableOptionIds: ["call"],
+      recommendedAnswer: "3bet small",
+      explanation:
+        "Recommended default. This hand has enough raw equity or blocker value to 3bet small, while calling can still be acceptable in some lineups.",
+      takeaway:
+        "Use small 3bets with hands that can value-build or apply blocker pressure; avoid jumping straight to all-in at normal stack depth.",
+    };
+  }
+
+  if (isButtonVsCutoffOpen) {
+    if (
+      STRONG_PLAYABLE_VS_OPEN.has(notation) ||
+      (pairRank >= getRankValue("7") && pairRank <= getRankValue("J"))
+    ) {
+      return {
+        correctOptionId: "call",
+        acceptableOptionIds: ["three-bet-small"],
+        recommendedAnswer: "Call",
+        explanation:
+          "Recommended default: Call. BTN versus CO is a wider configuration, so playable broadways and medium pairs should not be treated as automatic folds. 3bet small is also acceptable as a mixed aggressive option.",
+        takeaway:
+          "In late-position battles, do not overfold hands that realize equity well in position.",
+      };
+    }
+
+    if (MARGINAL_PLAYABLE_VS_STEAL.has(notation)) {
+      return {
+        correctOptionId: "call",
+        acceptableOptionIds: ["fold", "three-bet-small"],
+        recommendedAnswer: "Call",
+        explanation:
+          "This is a close/mixed preflop spot. The goal is not to punish reasonable alternatives: calling is a playable default in position, while folding or occasional small 3bets can be acceptable depending on opener tendencies.",
+        takeaway:
+          "Treat marginal broadways as context hands, not automatic trash, when you have position versus a cutoff open.",
+      };
+    }
+
+    if (CLEAR_FOLD_VS_STEAL.has(notation) || isVeryWeakOffsuit(notation)) {
+      return {
+        correctOptionId: "fold",
+        recommendedAnswer: "Fold",
+        explanation:
+          "Conservative default. Weak offsuit trash still performs poorly even in position because it makes dominated pairs and has limited backup equity.",
+        takeaway:
+          "Wide late-position configurations are not permission to continue with disconnected offsuit hands.",
+      };
+    }
+  }
+
+  if (isTightOpen) {
+    if (notation === "AJo") {
+      return {
+        correctOptionId: "fold",
+        acceptableOptionIds: ["call"],
+        recommendedAnswer: "Fold",
+        explanation:
+          "This is a close/mixed preflop spot versus a tighter open. AJo can be dominated by the strongest early-position range, so folding is the conservative default while calling can be acceptable in softer lineups.",
+        takeaway:
+          "Versus early-position opens, offsuit broadways need extra discipline because domination matters more.",
+      };
+    }
+
+    if (
+      notation === "KJo" ||
+      notation === "QJo" ||
+      notation === "KTo" ||
+      isVeryWeakOffsuit(notation)
+    ) {
+      return {
+        correctOptionId: "fold",
+        recommendedAnswer: "Fold",
+        explanation:
+          "Conservative default. Against UTG/HJ opens, dominated offsuit broadways lose value because the opening range is stronger.",
+        takeaway:
+          "Tight early-position opens require tighter continues, especially with offsuit broadways.",
+      };
+    }
+
+    if (
+      STRONG_PLAYABLE_VS_OPEN.has(notation) ||
+      (pairRank >= getRankValue("9") && pairRank <= getRankValue("J"))
+    ) {
+      return {
+        correctOptionId: "call",
+        acceptableOptionIds: ["fold", "three-bet-small"],
+        recommendedAnswer: "Call",
+        explanation:
+          "This is a close/mixed preflop spot versus a tighter open. Calling is playable with the stronger suited broadways and pairs, but tighter folds or small 3bets can be acceptable alternatives.",
+        takeaway:
+          "Versus early-position opens, continue with hands that retain equity well and avoid dominated offsuit calls.",
+      };
+    }
+  }
+
+  if (
+    STRONG_PLAYABLE_VS_OPEN.has(notation) ||
+    (pairRank >= getRankValue("8") && pairRank <= getRankValue("J"))
+  ) {
+    return {
+      correctOptionId: "call",
+      acceptableOptionIds: ["three-bet-small"],
+      recommendedAnswer: "Call",
+      explanation:
+        "Recommended default: Call. This hand is strong enough to continue versus an open, and 3bet small can be acceptable as a mixed aggressive line.",
+      takeaway:
+        "Do not collapse every non-premium hand into fold; playable hands need position and opener context.",
+    };
+  }
+
+  if (MARGINAL_PLAYABLE_VS_STEAL.has(notation) && !isTightOpen) {
+    return {
+      correctOptionId: "call",
+      acceptableOptionIds: ["fold"],
+      recommendedAnswer: "Call",
+      explanation:
+        "This is a close/mixed preflop spot. Calling is reasonable against later opens, while folding remains acceptable if the opener is tight.",
+      takeaway:
+        "Use opener position to decide whether marginal hands are profitable continues or disciplined folds.",
+    };
+  }
+
+  return {
+    correctOptionId: "fold",
+    recommendedAnswer: "Fold",
+    explanation:
+      "Conservative default. This hand is too dominated or disconnected to continue profitably against the open without stronger reads.",
+    takeaway:
+      "When the hand has poor equity realization and domination problems, folding preflop protects your stack.",
+  };
+}
+
 function createPreflopDisciplineQuestion(hand: PokerHand): QuizQuestion | null {
   const notation = normalizeHoleCards(hand.heroCards);
   const priorRaise = getPriorPreflopRaise(hand);
@@ -737,12 +945,17 @@ function createPreflopDisciplineQuestion(hand: PokerHand): QuizQuestion | null {
   }
 
   if (priorRaise !== undefined && !["SB", "BB"].includes(hand.heroPosition)) {
-    if (getPreflopOpenContext(hand) === null) {
+    const openContext = getPreflopOpenContext(hand);
+
+    if (openContext === null) {
       return null;
     }
 
-    const recommendedOptionId = PREMIUM_HANDS.has(notation) ? "three-bet-large" : "fold";
-    const recommendedAnswer = recommendedOptionId === "three-bet-large" ? "3bet large" : "Fold";
+    const recommendation = createPreflopRecommendation(
+      notation,
+      hand.heroPosition,
+      openContext.openerPosition,
+    );
 
     return {
       id: `${hand.handId}-preflop-facing-open`,
@@ -752,16 +965,13 @@ function createPreflopDisciplineQuestion(hand: PokerHand): QuizQuestion | null {
       prompt: `Hero ${hand.heroPosition}: ${notation}. Facing an open raise, what is the best default action?`,
       context: createQuestionContext(hand),
       options: getPreflopOptions(FACING_OPEN_OPTIONS, hand),
-      correctOptionId: recommendedOptionId,
-      recommendedAnswer,
-      explanation:
-        recommendedOptionId === "three-bet-large"
-          ? "Recommended default. Premium hands perform well as value 3bets because worse broadways and pairs can continue."
-          : "Conservative default. Without a strong continuing hand, cold-calling open raises can create dominated postflop spots.",
-      takeaway:
-        recommendedOptionId === "three-bet-large"
-          ? "When your hand is clearly ahead of the opener's continuing range, prefer value before pot control."
-          : "When a hand is often dominated versus an opener, folding preflop protects your stack and simplifies the tree.",
+      correctOptionId: recommendation.correctOptionId,
+      ...(recommendation.acceptableOptionIds === undefined
+        ? {}
+        : { acceptableOptionIds: recommendation.acceptableOptionIds }),
+      recommendedAnswer: recommendation.recommendedAnswer,
+      explanation: recommendation.explanation,
+      takeaway: recommendation.takeaway,
     };
   }
 
@@ -1185,6 +1395,8 @@ export function scoreQuizAnswers(
       }
 
       const isReviewOnly = question.correctOptionId === undefined;
+      const isCorrectAnswer = selectedOptionId === question.correctOptionId;
+      const isAcceptableAnswer = question.acceptableOptionIds?.includes(selectedOptionId) === true;
 
       return {
         answered: currentScore.answered + 1,
@@ -1192,7 +1404,7 @@ export function scoreQuizAnswers(
           ? currentScore.answerableAnswered
           : currentScore.answerableAnswered + 1,
         correct:
-          !isReviewOnly && selectedOptionId === question.correctOptionId
+          !isReviewOnly && (isCorrectAnswer || isAcceptableAnswer)
             ? currentScore.correct + 1
             : currentScore.correct,
         reviewSpots: isReviewOnly ? currentScore.reviewSpots + 1 : currentScore.reviewSpots,

@@ -180,4 +180,42 @@ describe("holeCardMatrix", () => {
     expect(offsuitConnector.totalBigBlindsWon).toBe(4);
     expect(offsuitConnector.bbPer100).toBe(200);
   });
+
+  it("keeps suited and offsuit broadway cells separate without collisions", () => {
+    const matrix = createHoleCardMatrix([
+      createHand({
+        handId: "aks",
+        heroCards: ["Ah", "Kh"],
+        heroNetResult: 2,
+      }),
+      createHand({
+        handId: "ako",
+        heroCards: ["Ah", "Kd"],
+        heroNetResult: -1,
+      }),
+      createHand({
+        handId: "kjs",
+        heroCards: ["Kh", "Jh"],
+        heroNetResult: 3,
+      }),
+      createHand({
+        handId: "kjo",
+        heroCards: ["Kh", "Jd"],
+        heroNetResult: -2,
+      }),
+    ]);
+
+    expect(getCell(matrix, "AKs").occurrences.map((occurrence) => occurrence.handId)).toEqual([
+      "aks",
+    ]);
+    expect(getCell(matrix, "AKo").occurrences.map((occurrence) => occurrence.handId)).toEqual([
+      "ako",
+    ]);
+    expect(getCell(matrix, "KJs").occurrences.map((occurrence) => occurrence.handId)).toEqual([
+      "kjs",
+    ]);
+    expect(getCell(matrix, "KJo").occurrences.map((occurrence) => occurrence.handId)).toEqual([
+      "kjo",
+    ]);
+  });
 });

@@ -124,6 +124,34 @@ describe("sessions", () => {
     expect(session?.bbPer100).toBeCloseTo(550);
   });
 
+  it("keeps total session hands and profit equal to the imported hand set", () => {
+    const inputHands = [
+      createHand({
+        handId: "later",
+        date: "2026/06/09 11:00:00 CEST",
+        heroNetResult: 0.1,
+      }),
+      createHand({
+        handId: "earlier-1",
+        date: "2026/06/09 10:00:00 CEST",
+        heroNetResult: 0.42,
+      }),
+      createHand({
+        handId: "earlier-2",
+        date: "2026/06/09 10:10:00 CEST",
+        heroNetResult: -0.2,
+      }),
+    ];
+    const sessions = detectPokerSessions(inputHands);
+
+    expect(sessions.reduce((total, session) => total + session.handCount, 0)).toBe(
+      inputHands.length,
+    );
+    expect(sessions.reduce((total, session) => total + session.profitAmount, 0)).toBeCloseTo(
+      inputHands.reduce((total, hand) => total + hand.heroNetResult, 0),
+    );
+  });
+
   it("estimates table count from distinct table names in 60-second buckets", () => {
     const hands = [
       createHand({ handId: "1", date: "2026/06/09 10:00:00 CEST", tableName: "A" }),

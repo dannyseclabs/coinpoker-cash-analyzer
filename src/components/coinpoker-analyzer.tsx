@@ -1905,6 +1905,14 @@ function StudyQuizSection({
     currentQuestion?.correctOptionId === undefined
       ? undefined
       : currentQuestion.options.find((option) => option.id === currentQuestion.correctOptionId);
+  const acceptableOptions =
+    currentQuestion?.acceptableOptionIds
+      ?.map((optionId) => currentQuestion.options.find((option) => option.id === optionId))
+      .filter((option): option is NonNullable<typeof option> => option !== undefined) ?? [];
+  const isSelectedAcceptable =
+    currentQuestion !== undefined &&
+    selectedOptionId !== null &&
+    currentQuestion.acceptableOptionIds?.includes(selectedOptionId) === true;
   const defensiveOptions =
     currentQuestion?.options.filter((option) =>
       ["fold", "check", "call"].includes(option.action),
@@ -2297,7 +2305,9 @@ function StudyQuizSection({
                           ? "Review-only"
                           : selectedOptionId === currentQuestion.correctOptionId
                             ? "✅ Correct"
-                            : "❌ Incorrect"}
+                            : isSelectedAcceptable
+                              ? "🟡 Acceptable"
+                              : "❌ Incorrect"}
                       </p>
                       <p className="mt-1 text-sm text-zinc-300">
                         Selected: {selectedOption?.label ?? "-"}
@@ -2308,6 +2318,12 @@ function StudyQuizSection({
                           ? currentQuestion.recommendedAnswer
                           : (recommendedOption?.label ?? currentQuestion.recommendedAnswer)}
                       </p>
+                      {acceptableOptions.length === 0 ? null : (
+                        <p className="mt-1 text-sm text-zinc-300">
+                          Also acceptable:{" "}
+                          {acceptableOptions.map((option) => option.label).join(", ")}
+                        </p>
+                      )}
                       {currentQuestion.correctOptionId === undefined ? (
                         <p className="mt-1 text-sm text-zinc-300">No correct answer available.</p>
                       ) : null}

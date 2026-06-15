@@ -1,5 +1,6 @@
 import { HOLE_CARD_RANKS, normalizeHoleCards } from "./stats/holeCardMatrix";
 import { isSplashPot } from "./stats/splashPots";
+import { didHeroReachTrackedShowdown } from "./showdown";
 import type { PokerHand, PokerPosition } from "../types";
 
 export type HandExplorerPositionFilter = "All" | Exclude<PokerPosition, "UNKNOWN">;
@@ -217,13 +218,7 @@ function roundStat(value: number): number {
 }
 
 export function didHeroReachShowdown(hand: PokerHand): boolean {
-  if (hand.showdown?.entries.some((entry) => entry.playerName === "Hero" && entry.cards !== null)) {
-    return true;
-  }
-
-  return hand.actions.some(
-    (action) => action.playerName === "Hero" && ["muck", "show"].includes(action.type),
-  );
+  return didHeroReachTrackedShowdown(hand);
 }
 
 function matchesShowdown(hand: PokerHand, showdown: HandExplorerShowdownFilter): boolean {
