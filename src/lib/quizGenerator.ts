@@ -46,6 +46,17 @@ export interface QuizOption {
   readonly action: QuizOptionAction;
 }
 
+export type QuizAnswerCorrectnessLabel = "correct" | "acceptable" | "marginal" | "incorrect";
+
+export type QuizConfidence = "high" | "medium" | "low";
+
+export interface QuizAnswerEvaluation {
+  readonly optionId: string;
+  readonly label: QuizAnswerCorrectnessLabel;
+  readonly scorePercent: number;
+  readonly reason?: string;
+}
+
 export interface QuizQuestionContext {
   readonly heroCards: string;
   readonly heroPosition: PokerPosition;
@@ -66,9 +77,13 @@ export interface QuizQuestion {
   readonly options: readonly QuizOption[];
   readonly correctOptionId?: string;
   readonly acceptableOptionIds?: readonly string[];
+  readonly marginalOptionIds?: readonly string[];
+  readonly answerEvaluations?: readonly QuizAnswerEvaluation[];
   readonly recommendedAnswer: string;
   readonly explanation: string;
   readonly takeaway: string;
+  readonly confidence?: QuizConfidence;
+  readonly confidenceReason?: string;
 }
 
 export interface GenerateQuizQuestionsOptions {
@@ -105,24 +120,33 @@ interface PreflopOpenContext {
   readonly openSizeBb: number;
   readonly callerPositions: readonly PokerPosition[];
   readonly facingAction: string;
+  readonly openerTendency: OpponentTendency;
+  readonly openerTendencyNote: string;
 }
 
 interface PreflopRecommendation {
   readonly correctOptionId: string;
   readonly acceptableOptionIds?: readonly string[];
+  readonly marginalOptionIds?: readonly string[];
+  readonly answerEvaluations?: readonly QuizAnswerEvaluation[];
   readonly recommendedAnswer: string;
   readonly explanation: string;
   readonly takeaway: string;
+  readonly confidence?: QuizConfidence;
+  readonly confidenceReason?: string;
 }
+
+type OpponentTendency = "loose" | "tight" | "unknown";
 
 const DEFAULT_QUIZ_LIMIT = 20;
 const HERO_NAME = "Hero";
 const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"] as const;
-const WEAK_OFFSUIT_HANDS = new Set(["KTo", "QTo", "JTo", "QJo", "KJo", "ATo", "A9o", "K9o", "Q9o"]);
 const PREMIUM_HANDS = new Set(["AA", "KK", "QQ", "JJ", "AKs", "AKo", "AQs"]);
 const STRONG_OPEN_HANDS = new Set([
   "TT",
   "99",
+  "88",
+  "77",
   "AQs",
   "AQo",
   "AJs",
@@ -131,6 +155,48 @@ const STRONG_OPEN_HANDS = new Set([
   "KJs",
   "QJs",
   "JTs",
+]);
+const STANDARD_LATE_POSITION_OPEN_HANDS = new Set([
+  "66",
+  "55",
+  "44",
+  "33",
+  "22",
+  "ATo",
+  "KQo",
+  "KJo",
+  "KTo",
+  "QJo",
+  "QTo",
+  "JTo",
+]);
+const MARGINAL_CO_OPEN_HANDS = new Set([
+  "QTo",
+  "JTo",
+  "KTo",
+  "A9o",
+  "Q9s",
+  "J9s",
+  "T9s",
+  "98s",
+  "87s",
+  "76s",
+  "65s",
+]);
+const BUTTON_STEAL_OPEN_HANDS = new Set([
+  "A9o",
+  "A8o",
+  "A7o",
+  "A6o",
+  "A5o",
+  "A4o",
+  "A3o",
+  "A2o",
+  "K9o",
+  "Q9o",
+  "J9o",
+  "T9o",
+  "98o",
 ]);
 const PREFLOP_THREE_BET_CANDIDATES = new Set(["AA", "KK", "QQ", "AKs", "AKo", "AQs", "AQo"]);
 const STRONG_PLAYABLE_VS_OPEN = new Set([
@@ -211,6 +277,27 @@ const REVIEW_SPOT_OPTIONS: readonly QuizOption[] = [
   { id: "splash-distortion", label: "Splash distortion", action: "review-splash" },
   { id: "value-leak", label: "Value leak", action: "review-value-leak" },
 ];
+
+const DEFAULT_EVALUATION_REASONS: Readonly<Record<QuizAnswerCorrectnessLabel, string>> = {
+  correct: "Matches the default population recommendation for this rule-based quiz spot.",
+  acceptable: "Reasonable alternative for this spot; poker decisions can depend on table context.",
+  marginal: "Playable only in some lineups or tighter/looser strategies, but not the default.",
+  incorrect: "Does not fit the default population heuristic for this spot.",
+};
+
+function createEvaluation(
+  optionId: string,
+  label: QuizAnswerCorrectnessLabel,
+  scorePercent: number,
+  reason?: string,
+): QuizAnswerEvaluation {
+  return {
+    optionId,
+    label,
+    scorePercent,
+    ...(reason === undefined ? {} : { reason }),
+  };
+}
 
 function roundStat(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -573,6 +660,10 @@ function isSuited(notation: string): boolean {
   return notation.endsWith("s");
 }
 
+function isOffsuit(notation: string): boolean {
+  return notation.endsWith("o");
+}
+
 function isPairNotation(notation: string): boolean {
   return notation.length === 2 && notation[0] === notation[1];
 }
@@ -581,8 +672,52 @@ function getPairRankValue(notation: string): number {
   return isPairNotation(notation) ? getRankValue(notation[0] ?? "2") : -1;
 }
 
+function getLowRankValue(notation: string): number {
+  return getRankValue(notation[1] ?? "2");
+}
+
 function isAceWheelSuited(notation: string): boolean {
   return ["A5s", "A4s"].includes(notation);
+}
+
+function isSuitedAce(notation: string): boolean {
+  return isSuited(notation) && notation[0] === "A";
+}
+
+function isSuitedKingOrQueen(notation: string): boolean {
+  return isSuited(notation) && ["K", "Q"].includes(notation[0] ?? "2");
+}
+
+function isSuitedBroadway(notation: string): boolean {
+  return isSuited(notation) && getLowRankValue(notation) >= getRankValue("T");
+}
+
+function isSuitedConnectorDownTo65(notation: string): boolean {
+  if (!isSuited(notation)) {
+    return false;
+  }
+
+  const highRank = getHighRankValue(notation);
+  const lowRank = getLowRankValue(notation);
+
+  return highRank - lowRank === 1 && lowRank >= getRankValue("5");
+}
+
+function isSelectiveSuitedOneGapper(notation: string): boolean {
+  if (!isSuited(notation)) {
+    return false;
+  }
+
+  const highRank = getHighRankValue(notation);
+  const lowRank = getLowRankValue(notation);
+
+  return highRank - lowRank === 2 && lowRank >= getRankValue("6");
+}
+
+function isDeepOpenStack(hand: PokerHand): boolean {
+  const effectiveStackBb = getEffectiveStackBb(hand);
+
+  return effectiveStackBb === null || effectiveStackBb >= 80;
 }
 
 function isVeryWeakOffsuit(notation: string): boolean {
@@ -614,6 +749,37 @@ function isVeryWeakOffsuit(notation: string): boolean {
 
 function getPlayerPosition(hand: PokerHand, playerName: string): PokerPosition {
   return hand.players.find((player) => player.name === playerName)?.position ?? "UNKNOWN";
+}
+
+function getOpponentTendency(hand: PokerHand, playerName: string): OpponentTendency {
+  const player = hand.players.find((candidate) => candidate.name === playerName);
+  const vpip = player?.vpip;
+
+  if (vpip === undefined) {
+    return "unknown";
+  }
+
+  if (vpip >= 35) {
+    return "loose";
+  }
+
+  if (vpip <= 18) {
+    return "tight";
+  }
+
+  return "unknown";
+}
+
+function getOpponentTendencyNote(tendency: OpponentTendency): string {
+  if (tendency === "loose") {
+    return "Opponent tendency: Loose. Available VPIP suggests a wider range, so continuing in position can become more attractive.";
+  }
+
+  if (tendency === "tight") {
+    return "Opponent tendency: Tight. Available VPIP suggests a stronger range, so dominated offsuit continues become worse.";
+  }
+
+  return "Opponent tendency unknown. This recommendation uses a default population heuristic.";
 }
 
 function getHeroFirstPreflopDecision(hand: PokerHand): HandAction | undefined {
@@ -676,6 +842,7 @@ function getPreflopOpenContext(hand: PokerHand): PreflopOpenContext | null {
     )
     .map((action) => getPlayerPosition(hand, action.playerName));
   const openerPosition = getPlayerPosition(hand, openRaise.playerName);
+  const openerTendency = getOpponentTendency(hand, openRaise.playerName);
   const callerText =
     callerPositions.length === 0
       ? "0 callers"
@@ -687,6 +854,8 @@ function getPreflopOpenContext(hand: PokerHand): PreflopOpenContext | null {
     openSizeBb,
     callerPositions,
     facingAction: `Facing ${openerPosition} open to ${openSizeBb} BB · ${callerText}`,
+    openerTendency,
+    openerTendencyNote: getOpponentTendencyNote(openerTendency),
   };
 }
 
@@ -797,6 +966,8 @@ function createPreflopRecommendation(
   notation: string,
   heroPosition: PokerPosition,
   openerPosition: PokerPosition,
+  openerTendency: OpponentTendency,
+  openerTendencyNote: string,
 ): PreflopRecommendation {
   const isButtonVsCutoffOpen = heroPosition === "BTN" && openerPosition === "CO";
   const isTightOpen = openerPosition === "UTG" || openerPosition === "HJ";
@@ -815,6 +986,88 @@ function createPreflopRecommendation(
   }
 
   if (isButtonVsCutoffOpen) {
+    if (notation === "KJo") {
+      if (openerTendency === "tight") {
+        return {
+          correctOptionId: "fold",
+          acceptableOptionIds: ["call"],
+          marginalOptionIds: ["three-bet-small"],
+          answerEvaluations: [
+            createEvaluation(
+              "fold",
+              "correct",
+              100,
+              "Against a tight CO opener, folding KJo avoids dominated offsuit spots.",
+            ),
+            createEvaluation(
+              "call",
+              "acceptable",
+              75,
+              "Calling can still be acceptable in position if the opener is not too strong postflop.",
+            ),
+            createEvaluation(
+              "three-bet-small",
+              "marginal",
+              45,
+              "Small 3betting KJo loses appeal versus a tight range without stronger fold reads.",
+            ),
+            createEvaluation(
+              "three-bet-large",
+              "incorrect",
+              0,
+              "Large 3bets with dominated offsuit broadways are too loose at normal stack depth.",
+            ),
+          ],
+          recommendedAnswer: "Fold",
+          explanation: `This is a close/mixed preflop spot, but the opener appears tight. KJo can be dominated by a stronger CO range, so folding is the conservative default while calling remains acceptable in position. ${openerTendencyNote}`,
+          takeaway:
+            "Use opponent tendency to downgrade dominated offsuit calls against tighter openers.",
+          confidence: "medium",
+          confidenceReason:
+            "Rule-based score uses a simple VPIP bucket; exact strategy still depends on opener sizing and postflop tendencies.",
+        };
+      }
+
+      return {
+        correctOptionId: "call",
+        acceptableOptionIds: ["three-bet-small"],
+        marginalOptionIds: ["fold"],
+        answerEvaluations: [
+          createEvaluation(
+            "call",
+            "correct",
+            100,
+            "Calling realizes equity in position versus a CO range and keeps dominated hands from overplaying.",
+          ),
+          createEvaluation(
+            "three-bet-small",
+            "acceptable",
+            75,
+            "A small 3bet can be acceptable as a mixed aggressive option, especially without deeper villain reads.",
+          ),
+          createEvaluation(
+            "fold",
+            "marginal",
+            openerTendency === "loose" ? 40 : 50,
+            "Folding is tight but not unreasonable if the opener is strong or Hero wants lower-variance defaults.",
+          ),
+          createEvaluation(
+            "three-bet-large",
+            "incorrect",
+            0,
+            "Large 3bets with KJo are too aggressive at normal stack depth without a clear exploit.",
+          ),
+        ],
+        recommendedAnswer: "Call",
+        explanation: `This is a close/mixed preflop spot. The goal is not to punish reasonable alternatives: calling is a playable default in position, occasional small 3bets can be acceptable, and folding is marginal rather than a hard failure. ${openerTendencyNote}`,
+        takeaway:
+          "Treat marginal broadways as context hands, not automatic trash, when you have position versus a cutoff open.",
+        confidence: "medium",
+        confidenceReason:
+          "Without detailed fold-to-3bet or postflop reads, this is a default population recommendation.",
+      };
+    }
+
     if (
       STRONG_PLAYABLE_VS_OPEN.has(notation) ||
       (pairRank >= getRankValue("7") && pairRank <= getRankValue("J"))
@@ -936,6 +1189,210 @@ function createPreflopRecommendation(
   };
 }
 
+function isAnyPocketPair(notation: string): boolean {
+  return isPairNotation(notation) && getPairRankValue(notation) >= getRankValue("2");
+}
+
+function isCoSuitedKingQueenOpen(notation: string): boolean {
+  if (!isSuited(notation)) {
+    return false;
+  }
+
+  const highRank = notation[0] ?? "2";
+  const lowRank = getLowRankValue(notation);
+
+  return (
+    (highRank === "K" && lowRank >= getRankValue("9")) ||
+    (highRank === "Q" && lowRank >= getRankValue("9"))
+  );
+}
+
+function isStandardLatePositionOpen(notation: string): boolean {
+  return (
+    PREMIUM_HANDS.has(notation) ||
+    STRONG_OPEN_HANDS.has(notation) ||
+    STANDARD_LATE_POSITION_OPEN_HANDS.has(notation) ||
+    isAnyPocketPair(notation) ||
+    isSuitedAce(notation) ||
+    isSuitedBroadway(notation) ||
+    isSuitedConnectorDownTo65(notation)
+  );
+}
+
+function isMarginalLatePositionOpen(notation: string): boolean {
+  return (
+    MARGINAL_CO_OPEN_HANDS.has(notation) ||
+    notation === "A9o" ||
+    isCoSuitedKingQueenOpen(notation) ||
+    isSelectiveSuitedOneGapper(notation)
+  );
+}
+
+function isButtonStealOpen(notation: string): boolean {
+  return (
+    isStandardLatePositionOpen(notation) ||
+    isMarginalLatePositionOpen(notation) ||
+    BUTTON_STEAL_OPEN_HANDS.has(notation) ||
+    isSuitedKingOrQueen(notation) ||
+    isSelectiveSuitedOneGapper(notation)
+  );
+}
+
+function createUnopenedPreflopRecommendation(
+  notation: string,
+  heroPosition: PokerPosition,
+  hand: PokerHand,
+): PreflopRecommendation | null {
+  const isDeepStack = isDeepOpenStack(hand);
+  const isAlwaysOpen =
+    PREMIUM_HANDS.has(notation) ||
+    STRONG_OPEN_HANDS.has(notation) ||
+    (isAnyPocketPair(notation) && getPairRankValue(notation) >= getRankValue("7"));
+
+  if (isAlwaysOpen) {
+    return {
+      correctOptionId: "raise",
+      recommendedAnswer: "Raise",
+      explanation:
+        "Recommended default. This is a strong first-in hand, so raising builds value, initiative, and fold equity.",
+      takeaway: "When first into the pot, prefer raise-or-fold defaults over limping.",
+    };
+  }
+
+  if (heroPosition === "CO") {
+    if (isDeepStack && isMarginalLatePositionOpen(notation)) {
+      return {
+        correctOptionId: "raise",
+        acceptableOptionIds: ["fold"],
+        answerEvaluations: [
+          createEvaluation(
+            "raise",
+            "correct",
+            100,
+            "Raise is the default CO steal action with this marginal but playable hand.",
+          ),
+          createEvaluation(
+            "fold",
+            "acceptable",
+            notation === "QTo" ? 60 : 65,
+            "Fold is acceptable in tighter simplified CO strategies.",
+          ),
+          createEvaluation(
+            "limp",
+            "incorrect",
+            0,
+            "The app uses a raise-or-fold first-in strategy from CO, not an open-limp default.",
+          ),
+        ],
+        recommendedAnswer: "Raise",
+        explanation:
+          notation === "QTo"
+            ? "QTo is a marginal but reasonable CO open when action folds to Hero. It can be folded in tighter strategies, but Raise should not be marked incorrect."
+            : "This is a marginal but reasonable open from the CO when action folds to Hero. Folding can be acceptable in tighter strategies, but raising should not be treated as a mistake.",
+        takeaway:
+          "CO steal spots are wider than early-position spots; avoid applying facing-open dominated-hand rules to unopened pots.",
+      };
+    }
+
+    if (
+      isDeepStack &&
+      (isStandardLatePositionOpen(notation) || isCoSuitedKingQueenOpen(notation))
+    ) {
+      return {
+        correctOptionId: "raise",
+        recommendedAnswer: "Raise",
+        explanation:
+          "Recommended default. This hand fits a reasonable CO first-in range, so raising is preferred over limping.",
+        takeaway:
+          "When action folds to the CO, open playable pairs, broadways, suited aces, and connected suited hands with a raise-or-fold plan.",
+      };
+    }
+  }
+
+  if (heroPosition === "BTN") {
+    if (isDeepStack && isButtonStealOpen(notation)) {
+      return {
+        correctOptionId: "raise",
+        recommendedAnswer: "Raise",
+        explanation:
+          "Recommended default. BTN steal ranges are wider than CO ranges, and this hand is a reasonable open when action folds to Hero.",
+        takeaway:
+          "On the button, use position to open wider with broadways, suited hands, pairs, and selected offsuit steal hands.",
+      };
+    }
+  }
+
+  if (heroPosition === "SB") {
+    if (isDeepStack && isButtonStealOpen(notation) && !isVeryWeakOffsuit(notation)) {
+      return {
+        correctOptionId: "raise",
+        acceptableOptionIds: ["fold"],
+        recommendedAnswer: "Raise",
+        explanation:
+          "Recommended default. SB first-in ranges can be wide, but this app uses a raise-or-fold default rather than recommending limp.",
+        takeaway:
+          "Small-blind opens are strategy-dependent, but avoid defaulting to limp unless you are intentionally studying a limp strategy.",
+      };
+    }
+
+    return {
+      correctOptionId: "fold",
+      recommendedAnswer: "Fold",
+      explanation:
+        "Conservative default. From the SB, weak hands still play out of position, so folding is preferred when the hand is too disconnected for a raise.",
+      takeaway:
+        "Small-blind steal ranges can be wide, but raise-or-fold discipline matters when the hand has poor equity realization.",
+    };
+  }
+
+  if (heroPosition === "UTG" || heroPosition === "HJ") {
+    if (PREMIUM_HANDS.has(notation) || STRONG_OPEN_HANDS.has(notation)) {
+      return {
+        correctOptionId: "raise",
+        recommendedAnswer: "Raise",
+        explanation:
+          "Recommended default. Early-position opens should stay tighter, but this hand is strong enough to raise first in.",
+        takeaway:
+          "Early position needs stronger opening discipline than CO, BTN, or SB steal seats.",
+      };
+    }
+
+    if (isOffsuit(notation) || isVeryWeakOffsuit(notation)) {
+      return {
+        correctOptionId: "fold",
+        marginalOptionIds: ["raise"],
+        answerEvaluations: [
+          createEvaluation(
+            "fold",
+            "correct",
+            100,
+            "Fold keeps UTG/HJ first-in ranges disciplined with dominated offsuit broadways.",
+          ),
+          createEvaluation(
+            "raise",
+            "marginal",
+            notation === "QTo" ? 40 : 45,
+            "Raising a marginal offsuit broadway from early position is too wide for the default heuristic.",
+          ),
+          createEvaluation(
+            "limp",
+            "incorrect",
+            0,
+            "Open-limping does not fit the quiz's raise-or-fold first-in default.",
+          ),
+        ],
+        recommendedAnswer: "Fold",
+        explanation:
+          "Conservative default. Early-position unopened ranges are tighter, and offsuit marginal broadways can run into domination.",
+        takeaway:
+          "Do not use late-position steal ranges from UTG/HJ; position should tighten the opening threshold.",
+      };
+    }
+  }
+
+  return null;
+}
+
 function createPreflopDisciplineQuestion(hand: PokerHand): QuizQuestion | null {
   const notation = normalizeHoleCards(hand.heroCards);
   const priorRaise = getPriorPreflopRaise(hand);
@@ -955,6 +1412,8 @@ function createPreflopDisciplineQuestion(hand: PokerHand): QuizQuestion | null {
       notation,
       hand.heroPosition,
       openContext.openerPosition,
+      openContext.openerTendency,
+      openContext.openerTendencyNote,
     );
 
     return {
@@ -969,9 +1428,19 @@ function createPreflopDisciplineQuestion(hand: PokerHand): QuizQuestion | null {
       ...(recommendation.acceptableOptionIds === undefined
         ? {}
         : { acceptableOptionIds: recommendation.acceptableOptionIds }),
+      ...(recommendation.marginalOptionIds === undefined
+        ? {}
+        : { marginalOptionIds: recommendation.marginalOptionIds }),
+      ...(recommendation.answerEvaluations === undefined
+        ? {}
+        : { answerEvaluations: recommendation.answerEvaluations }),
       recommendedAnswer: recommendation.recommendedAnswer,
       explanation: recommendation.explanation,
       takeaway: recommendation.takeaway,
+      ...(recommendation.confidence === undefined ? {} : { confidence: recommendation.confidence }),
+      ...(recommendation.confidenceReason === undefined
+        ? {}
+        : { confidenceReason: recommendation.confidenceReason }),
     };
   }
 
@@ -979,19 +1448,11 @@ function createPreflopDisciplineQuestion(hand: PokerHand): QuizQuestion | null {
     return null;
   }
 
-  if (
-    !WEAK_OFFSUIT_HANDS.has(notation) &&
-    !PREMIUM_HANDS.has(notation) &&
-    !STRONG_OPEN_HANDS.has(notation)
-  ) {
+  const recommendation = createUnopenedPreflopRecommendation(notation, hand.heroPosition, hand);
+
+  if (recommendation === null) {
     return null;
   }
-
-  const recommendedOptionId =
-    WEAK_OFFSUIT_HANDS.has(notation) && !["BTN", "SB"].includes(hand.heroPosition)
-      ? "fold"
-      : "raise";
-  const recommendedAnswer = recommendedOptionId === "fold" ? "Fold" : "Raise";
 
   return {
     id: `${hand.handId}-preflop-unopened`,
@@ -1001,16 +1462,23 @@ function createPreflopDisciplineQuestion(hand: PokerHand): QuizQuestion | null {
     prompt: `Hero ${hand.heroPosition}: ${notation}. Action folds to Hero. What is the best default action?`,
     context: createQuestionContext(hand),
     options: getPreflopOptions(OPEN_PREFLOP_OPTIONS, hand),
-    correctOptionId: recommendedOptionId,
-    recommendedAnswer,
-    explanation:
-      recommendedOptionId === "fold"
-        ? "Likely better action. Weak offsuit broadways often make dominated one-pair hands and create reverse implied odds."
-        : "Recommended default. Raising playable hands first in gives Hero initiative and fold equity.",
-    takeaway:
-      recommendedOptionId === "fold"
-        ? "With dominated offsuit hands outside the best steal seats, discipline beats curiosity."
-        : "When first into the pot, prefer raise-or-fold defaults over limping.",
+    correctOptionId: recommendation.correctOptionId,
+    ...(recommendation.acceptableOptionIds === undefined
+      ? {}
+      : { acceptableOptionIds: recommendation.acceptableOptionIds }),
+    ...(recommendation.marginalOptionIds === undefined
+      ? {}
+      : { marginalOptionIds: recommendation.marginalOptionIds }),
+    ...(recommendation.answerEvaluations === undefined
+      ? {}
+      : { answerEvaluations: recommendation.answerEvaluations }),
+    recommendedAnswer: recommendation.recommendedAnswer,
+    explanation: recommendation.explanation,
+    takeaway: recommendation.takeaway,
+    ...(recommendation.confidence === undefined ? {} : { confidence: recommendation.confidence }),
+    ...(recommendation.confidenceReason === undefined
+      ? {}
+      : { confidenceReason: recommendation.confidenceReason }),
   };
 }
 
@@ -1382,6 +1850,42 @@ export function getVisibleQuizInformation(
   };
 }
 
+export function evaluateQuizAnswer(
+  question: QuizQuestion,
+  selectedOptionId: string | undefined,
+): QuizAnswerEvaluation | undefined {
+  if (selectedOptionId === undefined || question.correctOptionId === undefined) {
+    return undefined;
+  }
+
+  const explicitEvaluation = question.answerEvaluations?.find(
+    (evaluation) => evaluation.optionId === selectedOptionId,
+  );
+
+  if (explicitEvaluation !== undefined) {
+    return explicitEvaluation;
+  }
+
+  if (selectedOptionId === question.correctOptionId) {
+    return createEvaluation(selectedOptionId, "correct", 100, DEFAULT_EVALUATION_REASONS.correct);
+  }
+
+  if (question.acceptableOptionIds?.includes(selectedOptionId) === true) {
+    return createEvaluation(
+      selectedOptionId,
+      "acceptable",
+      75,
+      DEFAULT_EVALUATION_REASONS.acceptable,
+    );
+  }
+
+  if (question.marginalOptionIds?.includes(selectedOptionId) === true) {
+    return createEvaluation(selectedOptionId, "marginal", 50, DEFAULT_EVALUATION_REASONS.marginal);
+  }
+
+  return createEvaluation(selectedOptionId, "incorrect", 0, DEFAULT_EVALUATION_REASONS.incorrect);
+}
+
 export function scoreQuizAnswers(
   questions: readonly QuizQuestion[],
   selectedOptionIds: Readonly<Record<string, string | undefined>>,
@@ -1395,18 +1899,15 @@ export function scoreQuizAnswers(
       }
 
       const isReviewOnly = question.correctOptionId === undefined;
-      const isCorrectAnswer = selectedOptionId === question.correctOptionId;
-      const isAcceptableAnswer = question.acceptableOptionIds?.includes(selectedOptionId) === true;
+      const evaluation = evaluateQuizAnswer(question, selectedOptionId);
+      const countsAsCorrect = evaluation?.label === "correct" || evaluation?.label === "acceptable";
 
       return {
         answered: currentScore.answered + 1,
         answerableAnswered: isReviewOnly
           ? currentScore.answerableAnswered
           : currentScore.answerableAnswered + 1,
-        correct:
-          !isReviewOnly && (isCorrectAnswer || isAcceptableAnswer)
-            ? currentScore.correct + 1
-            : currentScore.correct,
+        correct: !isReviewOnly && countsAsCorrect ? currentScore.correct + 1 : currentScore.correct,
         reviewSpots: isReviewOnly ? currentScore.reviewSpots + 1 : currentScore.reviewSpots,
       };
     },

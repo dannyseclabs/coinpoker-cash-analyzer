@@ -30,9 +30,11 @@ import {
 import { detectLeaks } from "@/src/lib/leaks/detectLeaks";
 import { parseCoinPokerFile } from "@/src/lib/parser/parseCoinPokerFile";
 import {
+  evaluateQuizAnswer,
   generateQuizQuestions,
   getVisibleQuizInformation,
   scoreQuizAnswers,
+  type QuizAnswerCorrectnessLabel,
   type QuizQuestion,
   type QuizTypeFilter,
 } from "@/src/lib/quizGenerator";
@@ -112,28 +114,24 @@ const HOLE_CARD_MATRIX_METRICS: readonly {
 
 const HOLE_CARD_LEGEND = [
   {
-    className: "border-emerald-700 bg-emerald-800",
-    label: "Dark Green = Strong Positive",
+    className: "border-[#1E40AF] bg-[#1D4ED8]",
+    label: "Dark Blue = Strong Positive",
   },
   {
-    className: "border-emerald-200 bg-emerald-100",
-    label: "Light Green = Positive",
+    className: "border-[#60A5FA] bg-[#93C5FD]",
+    label: "Light Blue = Positive",
   },
   {
-    className: "border-zinc-200 bg-zinc-100",
-    label: "Grey = No Sample",
+    className: "border-[#D1D5DB] bg-[#E5E7EB]",
+    label: "Light Gray = Neutral / No Sample",
   },
   {
-    className: "border-zinc-300 bg-zinc-50",
-    label: "Neutral = 1-4 Hands",
+    className: "border-[#FB923C] bg-[#FDBA74]",
+    label: "Light Orange = Negative",
   },
   {
-    className: "border-red-200 bg-red-100",
-    label: "Light Red = Negative",
-  },
-  {
-    className: "border-red-700 bg-red-800",
-    label: "Dark Red = Strong Negative",
+    className: "border-[#C2410C] bg-[#EA580C]",
+    label: "Dark Orange = Strong Negative",
   },
 ] as const;
 
@@ -214,6 +212,12 @@ const QUIZ_SPOT_TYPE_LABELS: Readonly<Record<QuizQuestion["spotType"], string>> 
   "value-bet": "Value Bet",
   "big-loss-review": "Big Loss Review",
   "showdown-review": "Showdown Review",
+};
+const QUIZ_EVALUATION_LABELS: Readonly<Record<QuizAnswerCorrectnessLabel, string>> = {
+  correct: "✅ Correct",
+  acceptable: "🟡 Acceptable",
+  marginal: "🟠 Marginal",
+  incorrect: "❌ Incorrect",
 };
 const STREET_LABELS: Readonly<Record<PokerStreet, string>> = {
   preflop: "Preflop",
@@ -943,7 +947,7 @@ function getSampleSizeName(cell: HoleCardMatrixCell): string {
 }
 
 function getLowConfidenceHoleCardTone(): string {
-  return "border-zinc-300 bg-zinc-50 text-zinc-700 hover:bg-zinc-100";
+  return "border-[#D1D5DB] bg-[#E5E7EB] text-zinc-700 hover:bg-[#D1D5DB]";
 }
 
 function getHoleCardMetricValue(cell: HoleCardMatrixCell, metric: HoleCardMatrixMetric): number {
@@ -964,7 +968,7 @@ function getHoleCardMetricValue(cell: HoleCardMatrixCell, metric: HoleCardMatrix
 
 function getHoleCardTone(cell: HoleCardMatrixCell, metric: HoleCardMatrixMetric): string {
   if (cell.handsPlayed === 0) {
-    return "border-zinc-200 bg-zinc-100 text-zinc-400 hover:bg-zinc-200";
+    return "border-[#D1D5DB] bg-[#E5E7EB] text-zinc-500 hover:bg-[#D1D5DB]";
   }
 
   if (cell.handsPlayed < 5) {
@@ -975,11 +979,11 @@ function getHoleCardTone(cell: HoleCardMatrixCell, metric: HoleCardMatrixMetric)
 
   if (metric === "handsPlayed") {
     if (value >= 30) {
-      return "border-emerald-700 bg-emerald-800 text-white hover:bg-emerald-700";
+      return "border-[#1E40AF] bg-[#1D4ED8] text-white hover:bg-[#2563EB]";
     }
 
     if (value >= 5) {
-      return "border-emerald-200 bg-emerald-100 text-emerald-950 hover:bg-emerald-200";
+      return "border-[#60A5FA] bg-[#93C5FD] text-zinc-950 hover:bg-[#BFDBFE]";
     }
 
     return getLowConfidenceHoleCardTone();
@@ -987,35 +991,35 @@ function getHoleCardTone(cell: HoleCardMatrixCell, metric: HoleCardMatrixMetric)
 
   if (metric === "vpipFrequency") {
     if (value >= 75) {
-      return "border-emerald-700 bg-emerald-800 text-white hover:bg-emerald-700";
+      return "border-[#1E40AF] bg-[#1D4ED8] text-white hover:bg-[#2563EB]";
     }
 
     if (value > 0) {
-      return "border-emerald-200 bg-emerald-100 text-emerald-950 hover:bg-emerald-200";
+      return "border-[#60A5FA] bg-[#93C5FD] text-zinc-950 hover:bg-[#BFDBFE]";
     }
 
-    return "border-zinc-200 bg-zinc-100 text-zinc-500 hover:bg-zinc-200";
+    return "border-[#D1D5DB] bg-[#E5E7EB] text-zinc-500 hover:bg-[#D1D5DB]";
   }
 
   if (cell.handsPlayed >= 30) {
     if (value > 0) {
-      return "border-emerald-700 bg-emerald-800 text-white hover:bg-emerald-700";
+      return "border-[#1E40AF] bg-[#1D4ED8] text-white hover:bg-[#2563EB]";
     }
 
     if (value < 0) {
-      return "border-red-700 bg-red-800 text-white hover:bg-red-700";
+      return "border-[#C2410C] bg-[#EA580C] text-white hover:bg-[#F97316]";
     }
 
-    return "border-zinc-200 bg-zinc-100 text-zinc-500 hover:bg-zinc-200";
+    return "border-[#D1D5DB] bg-[#E5E7EB] text-zinc-500 hover:bg-[#D1D5DB]";
   }
 
   if (value > 0) {
-    return "border-emerald-200 bg-emerald-100 text-emerald-950 hover:bg-emerald-200";
+    return "border-[#60A5FA] bg-[#93C5FD] text-zinc-950 hover:bg-[#BFDBFE]";
   }
 
   return value < 0
-    ? "border-red-200 bg-red-100 text-red-950 hover:bg-red-200"
-    : "border-zinc-200 bg-zinc-100 text-zinc-500 hover:bg-zinc-200";
+    ? "border-[#FB923C] bg-[#FDBA74] text-orange-950 hover:bg-[#FED7AA]"
+    : "border-[#D1D5DB] bg-[#E5E7EB] text-zinc-500 hover:bg-[#D1D5DB]";
 }
 
 function getHoleCardTooltip(cell: HoleCardMatrixCell): string {
@@ -1901,6 +1905,10 @@ function StudyQuizSection({
     currentQuestion === undefined || selectedOptionId === null
       ? undefined
       : currentQuestion.options.find((option) => option.id === selectedOptionId);
+  const selectedAnswerEvaluation =
+    currentQuestion === undefined || selectedOptionId === null
+      ? undefined
+      : evaluateQuizAnswer(currentQuestion, selectedOptionId);
   const recommendedOption =
     currentQuestion?.correctOptionId === undefined
       ? undefined
@@ -1909,10 +1917,6 @@ function StudyQuizSection({
     currentQuestion?.acceptableOptionIds
       ?.map((optionId) => currentQuestion.options.find((option) => option.id === optionId))
       .filter((option): option is NonNullable<typeof option> => option !== undefined) ?? [];
-  const isSelectedAcceptable =
-    currentQuestion !== undefined &&
-    selectedOptionId !== null &&
-    currentQuestion.acceptableOptionIds?.includes(selectedOptionId) === true;
   const defensiveOptions =
     currentQuestion?.options.filter((option) =>
       ["fold", "check", "call"].includes(option.action),
@@ -2303,21 +2307,41 @@ function StudyQuizSection({
                       <p className="text-base font-semibold text-white">
                         {currentQuestion.correctOptionId === undefined
                           ? "Review-only"
-                          : selectedOptionId === currentQuestion.correctOptionId
-                            ? "✅ Correct"
-                            : isSelectedAcceptable
-                              ? "🟡 Acceptable"
-                              : "❌ Incorrect"}
+                          : selectedAnswerEvaluation === undefined
+                            ? "❌ Incorrect — 0%"
+                            : `${QUIZ_EVALUATION_LABELS[selectedAnswerEvaluation.label]} — ${formatNumber(
+                                selectedAnswerEvaluation.scorePercent,
+                              )}%`}
                       </p>
                       <p className="mt-1 text-sm text-zinc-300">
                         Selected: {selectedOption?.label ?? "-"}
                       </p>
                       <p className="mt-1 text-sm text-zinc-300">
-                        Recommended:{" "}
+                        Recommended default:{" "}
                         {currentQuestion.correctOptionId === undefined
                           ? currentQuestion.recommendedAnswer
                           : (recommendedOption?.label ?? currentQuestion.recommendedAnswer)}
                       </p>
+                      {selectedAnswerEvaluation === undefined ? null : (
+                        <p className="mt-1 text-sm text-zinc-300">
+                          Rule-based score: {formatNumber(selectedAnswerEvaluation.scorePercent)}%
+                        </p>
+                      )}
+                      {currentQuestion.confidence === undefined ? null : (
+                        <p className="mt-1 text-sm text-zinc-300">
+                          Decision confidence: {currentQuestion.confidence}
+                        </p>
+                      )}
+                      {currentQuestion.confidenceReason === undefined ? null : (
+                        <p className="mt-1 text-sm text-zinc-300">
+                          {currentQuestion.confidenceReason}
+                        </p>
+                      )}
+                      {selectedAnswerEvaluation?.reason === undefined ? null : (
+                        <p className="mt-1 text-sm text-zinc-300">
+                          Selected answer note: {selectedAnswerEvaluation.reason}
+                        </p>
+                      )}
                       {acceptableOptions.length === 0 ? null : (
                         <p className="mt-1 text-sm text-zinc-300">
                           Also acceptable:{" "}

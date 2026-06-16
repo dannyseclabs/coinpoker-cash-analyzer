@@ -675,9 +675,11 @@ describe("CoinPokerAnalyzer dashboard", () => {
 
     fireEvent.click(showAnswerButton);
 
-    expect(studyMode.getByText("❌ Incorrect")).toBeInTheDocument();
+    expect(studyMode.getByText("❌ Incorrect — 0%")).toBeInTheDocument();
     expect(studyMode.getByText("Selected: Call")).toBeInTheDocument();
-    expect(studyMode.getByText("Recommended: Fold")).toBeInTheDocument();
+    expect(studyMode.getByText("Recommended default: Fold")).toBeInTheDocument();
+    expect(studyMode.getByText("Rule-based score: 0%")).toBeInTheDocument();
+    expect(studyMode.getByText(/Selected answer note:/)).toBeInTheDocument();
     expect(studyMode.getByText("Actual Final Pot")).toBeInTheDocument();
     expect(studyMode.getByText("72 BB")).toBeInTheDocument();
     expect(studyMode.getByText("Actual Hero Result")).toBeInTheDocument();
@@ -759,12 +761,13 @@ describe("CoinPokerAnalyzer dashboard", () => {
       studyMode.getByText("Hero BTN: KJo. Facing an open raise, what is the best default action?"),
     ).toBeInTheDocument();
 
-    fireEvent.click(studyMode.getByRole("button", { name: /Fold/ }));
+    fireEvent.click(studyMode.getByRole("button", { name: /3bet small/ }));
     fireEvent.click(studyMode.getByRole("button", { name: "Show Answer" }));
 
-    expect(studyMode.getByText("🟡 Acceptable")).toBeInTheDocument();
-    expect(studyMode.getByText("Recommended: Call")).toBeInTheDocument();
-    expect(studyMode.getByText("Also acceptable: Fold, 3bet small")).toBeInTheDocument();
+    expect(studyMode.getByText("🟡 Acceptable — 75%")).toBeInTheDocument();
+    expect(studyMode.getByText("Recommended default: Call")).toBeInTheDocument();
+    expect(studyMode.getByText("Rule-based score: 75%")).toBeInTheDocument();
+    expect(studyMode.getByText("Also acceptable: 3bet small")).toBeInTheDocument();
     expect(studyMode.getByText("Correct: 1 / 1")).toBeInTheDocument();
   });
 

@@ -24,6 +24,8 @@ export interface Player {
   readonly startingStack: number;
   readonly isHero: boolean;
   readonly position: PokerPosition;
+  readonly vpip?: number;
+  readonly pfr?: number;
 }
 
 export type ActionType =
